@@ -110,3 +110,5 @@ kbkkk/
 仅供研究学习，不构成投资建议。
 
 <!-- kbkkk auto-merge e2e test -->
+
+<!-- kbkkk auto-merge infra: AGENTS.md + .cursor/rules + GitHub Actions smoke:check -->

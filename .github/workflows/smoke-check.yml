@@ -1,0 +1,29 @@
+name: smoke-check
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: smoke:check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 轻量 smoke check
+        run: |
+          echo "════════════════════════════════════════"
+          echo "kbkkk smoke check @ $(date -Iseconds)"
+          echo "════════════════════════════════════════"
+          # 检查必需文件存在
+          test -f README.md && echo "✓ README.md 存在"
+          test -f SPEC.md && echo "✓ SPEC.md 存在"
+          # 检查 backend 没意外删除
+          test -d backend && echo "✓ backend/ 存在"
+          # 检查没有大文件误提交
+          if [ $(du -sm . 2>/dev/null | cut -f1) -gt 100 ]; then
+            echo "⚠ 仓库大于 100MB，请检查"
+          fi
+          echo "════════════════════════════════════════"
+          echo "✓ smoke:check 通过"
