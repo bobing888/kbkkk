@@ -108,3 +108,5 @@ kbkkk/
 ## 许可
 
 仅供研究学习，不构成投资建议。
+
+<!-- kbkkk auto-merge e2e test -->
