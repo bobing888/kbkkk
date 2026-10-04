@@ -112,3 +112,5 @@ kbkkk/
 <!-- kbkkk auto-merge e2e test -->
 
 <!-- kbkkk auto-merge infra: AGENTS.md + .cursor/rules + GitHub Actions smoke:check -->
+
+<!-- 2026-10-04T20:14:16+08:00 engram hook e2e test -->
