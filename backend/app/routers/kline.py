@@ -58,7 +58,7 @@ async def get_kline(
         if "datetime" in row and hasattr(row["datetime"], "isoformat"):
             row["datetime"] = row["datetime"].isoformat()
 
-    # 4. 写缓存（5 分钟）
+    # 5. 写缓存（5 分钟）
     await cache_set(cache_key, data, ttl=300)
 
     return {"source": "fresh", "count": len(data), "data": data}
