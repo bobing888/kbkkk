@@ -1,4 +1,10 @@
-"""趋势强度指标 — ADX + +DI / -DI + MACD + SMA + 多指标共振"""
+"""趋势强度指标 — ADX + +DI / -DI + MACD + SMA + 多指标共振
+
+来源：bobing888/ai-trader (MIT/Apache-2.0) 复用
+原始项目：https://github.com/bobing888/ai-trader
+原始路径：backend/app/analytics/trend.py
+复用方式：纯 numpy 实现，零外部依赖
+"""
 
 from __future__ import annotations
 

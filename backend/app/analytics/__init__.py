@@ -30,46 +30,46 @@ __all__ = ["AnalyticsEngine"]
 
 
 class AnalyticsEngine:
-    """全指标工厂：一次调用输出 11 个指标列。
+    """全指标工厂：一次调用输出 17 个指标列。
 
     指标来源：
-    - services/indicators → MA5/10/20/60/120/250, DIF/DEA/MACD, RSI,
-                             BOLL_MID/UPPER/LOWER, K/D/J, OBV（通过 IndicatorEngine）
+    - services/indicators（内部 _calc_* 方法）→ MA5/10/20/60/120/250,
+      DIF/DEA/MACD, RSI, BOLL_MID/UPPER/LOWER, K/D/J, OBV
     - analytics/trend     → ADX14
     - analytics/volatility → ATR14
     - analytics/statistical → Hurst
     """
 
-    # IndicatorEngine 输出的列名映射到 AnalyticsEngine 标准列名
-    _IE_COL_MAP = {
-        "RSI": "RSI14",
-        # 其他列名相同
-        "MA5": "MA5", "MA10": "MA10", "MA20": "MA20",
-        "MA60": "MA60", "MA120": "MA120", "MA250": "MA250",
-        "DIF": "DIF", "DEA": "DEA", "MACD": "MACD",
-        "BOLL_MID": "BOLL_MID", "BOLL_UPPER": "BOLL_UPPER", "BOLL_LOWER": "BOLL_LOWER",
-        "K": "K", "D": "D", "J": "J",
-        "OBV": "OBV",
-    }
+    # RSI 列名映射：IndicatorEngine 输出 RSI，AnalyticsEngine 统一为 RSI14
+    _RSI_COL = "RSI"
+    _OUT_RSI_COL = "RSI14"
 
     @staticmethod
     def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
         """输出 df 含 17 个指标列（MA6/DIF/DEA/MACD/RSI/BOLL/KDJ/OBV/ADX14/ATR14/Hurst）。
 
-        对外输出列名统一：
-        - RSI14 ← IndicatorEngine 输出 RSI
-        - 其余列名与 IndicatorEngine 保持一致
+        对外输出列名统一：RSI → RSI14。
+
+        注意：
+        - Hurst 指标说明：数据 < 100 根（lag < 2）时返回 0.5（默认随机游走）
+          此为估算预期，不适用于 < 100 根的短周期回测
         """
         from app.services.indicators import IndicatorEngine
 
         df = df.copy()
 
-        # ── 1. IndicatorEngine（6 指标族）─────────────────────────────────────
-        ie_result = IndicatorEngine.calculate_all(df)
+        # ── 1. IndicatorEngine._calc_*（6 指标族，直接调内部方法避免循环依赖）────
+        ie = IndicatorEngine  # 类型提示用
+        df = ie._calc_ma(df)
+        df = ie._calc_macd(df)
+        df = ie._calc_rsi(df)
+        df = ie._calc_boll(df)
+        df = ie._calc_kdj(df)
+        df = ie._calc_obv(df)
 
-        # 按映射写入（RSI → RSI14，其余直写）
-        for ie_col, our_col in AnalyticsEngine._IE_COL_MAP.items():
-            df[our_col] = ie_result[ie_col]
+        # 统一列名：RSI → RSI14
+        if AnalyticsEngine._RSI_COL in df.columns:
+            df[AnalyticsEngine._OUT_RSI_COL] = df.pop(AnalyticsEngine._RSI_COL)
 
         # ── 2. ADX14（analytics/trend）────────────────────────────────────────
         h = df["high"].values.astype(np.float64)

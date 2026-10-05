@@ -57,15 +57,81 @@ def test_calculate_all_returns_11_columns():
     assert len(result) == len(df), "行数应与输入一致"
 
 
-# ─── 测试2：BTC 1h 1 年数据，11 列全非 NaN（warmup 除外）──────────────────
+# ─── 测试2a：OKX 路径 ─────────────────────────────────────────────────────────
 
-def test_calculate_all_btc_1h_year_all_columns_filled():
-    """BTC/USDT 1h 1 年数据 → 11 列在 warmup 后全为实数（无 NaN）。"""
+def test_calculate_all_btc_1h_year_okx_fetches(monkeypatch):
+    """OKX REST 可达时，验证解析路径正确（monkeypatch 模拟）。"""
     from app.analytics import AnalyticsEngine
 
-    # 优先尝试 OKX 公开 REST（1h × 8760 根 ≈ 1 年）
-    btc_df = None
+    # 模拟 OKX 返回格式的数据
+    fake_okx_data = {
+        "data": [
+            # OKX 格式：[ts, open, high, low, close, vol, quote_vol, ...]
+            # 最新在前，随机生成 8760 根
+            [str(int((pd.Timestamp("2025-01-01") + pd.Timedelta(hours=i)).value / 1e6)),
+             "50000.0", "50500.0", "49500.0", "50200.0", "100.5"]
+            for i in range(8760)
+        ]
+    }
+
+    def _mock_urlopen(req, timeout=None):
+        class FakeResp:
+            def read(self):
+                import json
+                return json.dumps(fake_okx_data).encode()
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+        return FakeResp()
+
+    monkeypatch.setattr("urllib.request.urlopen", _mock_urlopen)
+
     import urllib.request
+    url = (
+        "https://www.okx.com/api/v5/market/candles"
+        "?instId=BTC-USDT&bar=1h&limit=8760"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        import json
+        data = json.loads(resp.read())
+
+    assert data.get("data"), "OKX mock 应返回 data"
+    rows = list(reversed(data["data"]))
+    btc_df = pd.DataFrame(rows, columns=[
+        "datetime", "open", "high", "low", "close", "volume"
+    ])
+    btc_df["datetime"] = pd.to_datetime(
+        btc_df["datetime"].astype(float) / 1000, unit="s"
+    )
+    for col in ["open", "high", "low", "close", "volume"]:
+        btc_df[col] = pd.to_numeric(btc_df[col])
+
+    # 验证解析正确：应有 8760 根 K 线
+    assert len(btc_df) == 8760, f"OKX 解析后应为 8760 行，实际 {len(btc_df)}"
+    # 验证 calculate_all 在 OKX 数据上不抛异常
+    result = AnalyticsEngine.calculate_all(btc_df)
+    assert len(result) == 8760
+
+
+# ─── 测试2b：OKX 不可达时回退到 mock ─────────────────────────────────────────
+
+def test_calculate_all_btc_1h_year_fallback_to_mock(monkeypatch):
+    """OKX 不可达时，走 mock 回退，验证 17 列全输出（warmup 除外）。
+    
+    monkeypatch 让 urlopen 抛出 URLError，强制走回退路径。
+    """
+    from app.analytics import AnalyticsEngine
+    import urllib.error
+
+    def _mock_urlopen_fail(req, timeout=None):
+        raise urllib.error.URLError("Connection refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", _mock_urlopen_fail)
+
+    import urllib.request
+    btc_df = None
     try:
         url = (
             "https://www.okx.com/api/v5/market/candles"
@@ -77,7 +143,6 @@ def test_calculate_all_btc_1h_year_all_columns_filled():
             data = json.loads(resp.read())
         if data.get("data"):
             rows = data["data"]
-            # OKX 返回 [ts, open, high, low, close, vol, ...]，最新在前 → 倒序
             rows = list(reversed(rows))
             btc_df = pd.DataFrame(rows, columns=[
                 "datetime", "open", "high", "low", "close", "volume"
