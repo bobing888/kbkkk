@@ -33,6 +33,8 @@ logs/
 
 # Data
 data/
+# exception: backend/app/data/ is the MarketAdapter module, not raw data
+!backend/app/data/
 *.sqlite
 *.db
 
