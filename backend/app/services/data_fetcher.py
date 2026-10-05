@@ -65,7 +65,12 @@ class DataFetcher:
         """类方法版本（Provider 路由核心实现）。
 
         通过 _PROVIDERS 注册表路由到对应市场的 fetch 方法。
+
+        出口统一调用 normalize_kline_df（KB github-openbq-org-OpenBB.md §2
+        "Output normalization adapters"），保证 cn/us/crypto 返回字段名一致。
         """
+        from app.data.normalize import normalize_kline_df
+
         provider = cls._PROVIDERS.get(market)
         if provider is None:
             available = ", ".join(sorted(cls._PROVIDERS.keys()))
@@ -74,7 +79,8 @@ class DataFetcher:
             )
         # provider 是 function（未绑定），需要传实例
         instance = cls()
-        return provider(instance, symbol, period, start, end, adjust)
+        raw_df = provider(instance, symbol, period, start, end, adjust)
+        return normalize_kline_df(raw_df, market)
 
     # ──────────────── A 股 ────────────────
 
