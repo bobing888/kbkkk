@@ -50,22 +50,31 @@ class TestCnMarketAdapter:
         assert result["ticker"] == "300750"
         assert result["market"] == "cn"
 
-    # ── 交易时间 ──
+    def test_normalize_unknown_symbol_raises(self):
+        """M8: 未知前缀 symbol → ValueError（而非静默默认 shanghai）"""
+        with pytest.raises(ValueError, match="未知 A 股 symbol 前缀"):
+            self.adapter.normalize_symbol("999999")
+
+    # ── 交易时间（含午休）──
 
     def test_trading_hours_weekday_has_lunch_break(self):
-        """A 股工作日含午休（11:30-13:00）"""
+        """I2: A 股工作日返回两段（含午休 11:30-13:00）"""
         # 2024-01-02 是周二
         weekday = date(2024, 1, 2)
-        start, end = self.adapter.get_trading_hours(weekday)
-        assert start.time() == time(9, 30)
-        assert end.time() == time(15, 0)
+        sessions = self.adapter.get_trading_hours(weekday)
+        # 返回 list[tuple[datetime, datetime]]，A 股含两段
+        assert isinstance(sessions, list)
+        assert len(sessions) == 2
+        assert sessions[0][0].time() == time(9, 30)
+        assert sessions[0][1].time() == time(11, 30)
+        assert sessions[1][0].time() == time(13, 0)
+        assert sessions[1][1].time() == time(15, 0)
 
     def test_trading_hours_weekend(self):
-        """周末无交易"""
+        """周末无交易 → 空列表"""
         saturday = date(2024, 1, 6)  # 周六
-        start, end = self.adapter.get_trading_hours(saturday)
-        assert start is None
-        assert end is None
+        sessions = self.adapter.get_trading_hours(saturday)
+        assert sessions == []
 
     # ── 复权因子 ──
 
@@ -83,8 +92,8 @@ class TestCnMarketAdapter:
 
     # ── 涨跌停识别 ──
 
-    def test_limit_up_detection(self):
-        """涨幅 = +10% → limit_type=up"""
+    def test_limit_up_detection_main_board(self):
+        """I1: 主板 ±10% → limit_type=up（涨幅 10%）"""
         df = pd.DataFrame({
             "datetime": pd.date_range("2024-01-01 10:00", periods=3, freq="h"),
             "open": [10.0, 10.0, 11.0],
@@ -93,12 +102,12 @@ class TestCnMarketAdapter:
             "close": [10.0, 11.0, 11.0],
             "volume": [1000, 1000, 1000],
         })
-        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1))
+        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1), symbol="600519")
         assert "limit_type" in result.columns
         assert result["limit_type"].iloc[1] == "up"
 
-    def test_limit_down_detection(self):
-        """跌幅 = -10% → limit_type=down"""
+    def test_limit_down_detection_main_board(self):
+        """I1: 主板 -10% → limit_type=down"""
         # close 从 11.0 跌到 9.9 → pct_change = -10.0%
         df = pd.DataFrame({
             "datetime": pd.date_range("2024-01-01 10:00", periods=3, freq="h"),
@@ -108,9 +117,36 @@ class TestCnMarketAdapter:
             "close": [11.0, 9.9, 9.9],
             "volume": [1000, 1000, 1000],
         })
-        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1))
+        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1), symbol="000858")
         assert "limit_type" in result.columns
         assert result["limit_type"].iloc[1] == "down"
+
+    def test_limit_threshold_chi_next_symbol(self):
+        """I1: 创业板 300750 → ±20% 涨跌停阈值为 19.99%"""
+        # 主板在 10% 处涨停，创业板不应该在此阈值涨停
+        df = pd.DataFrame({
+            "datetime": pd.date_range("2024-01-01 10:00", periods=3, freq="h"),
+            "open": [10.0, 10.0, 11.0],   # 涨幅 10%，创业板不应触发
+            "high": [10.5, 10.5, 11.0],
+            "low": [9.5, 9.5, 10.0],
+            "close": [10.0, 11.0, 11.0],
+            "volume": [1000, 1000, 1000],
+        })
+        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1), symbol="300750")
+        assert result["limit_type"].iloc[1] == "none"  # 10% 不应触发创业板涨停
+
+    def test_limit_up_chi_next_20_percent(self):
+        """I1: 创业板 +20% → limit_type=up"""
+        df = pd.DataFrame({
+            "datetime": pd.date_range("2024-01-01 10:00", periods=3, freq="h"),
+            "open": [10.0, 10.0, 12.0],
+            "high": [10.5, 10.5, 12.0],
+            "low": [9.5, 9.5, 11.5],
+            "close": [10.0, 12.0, 12.0],
+            "volume": [1000, 1000, 1000],
+        })
+        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1), symbol="300750")
+        assert result["limit_type"].iloc[1] == "up"
 
     def test_no_limit_detection(self):
         """涨跌 < 10% → limit_type=none"""
@@ -122,7 +158,7 @@ class TestCnMarketAdapter:
             "close": [10.0, 10.5, 10.5],
             "volume": [1000, 1000, 1000],
         })
-        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1))
+        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1), symbol="600519")
         assert result["limit_type"].iloc[1] == "none"
 
     # ── 交易日判断 ──
@@ -141,6 +177,22 @@ class TestCnMarketAdapter:
         # 元旦 2024-01-01
         with patch.object(self.adapter, "_get_holidays", return_value=[date(2024, 1, 1)]):
             assert self.adapter.is_trading_day(date(2024, 1, 1)) is False
+
+    def test_2026_national_day_workday(self):
+        """I3: 2026-10-08 调休上班 → 交易日"""
+        assert self.adapter.is_trading_day(date(2026, 10, 8)) is True
+
+    def test_2026_national_day_holiday(self):
+        """I3: 2026-10-04 国庆假期 → 非交易日"""
+        assert self.adapter.is_trading_day(date(2026, 10, 4)) is False
+
+    def test_2026_national_day_holiday_06(self):
+        """I3: 2026-10-06 国庆假期 → 非交易日"""
+        assert self.adapter.is_trading_day(date(2026, 10, 6)) is False
+
+    def test_2026_national_day_holiday_07(self):
+        """I3: 2026-10-07 国庆假期 → 非交易日"""
+        assert self.adapter.is_trading_day(date(2026, 10, 7)) is False
 
 
 class TestUsMarketAdapter:
@@ -164,9 +216,11 @@ class TestUsMarketAdapter:
     def test_trading_hours_with_premarket(self):
         """美股交易时段含盘前（04:00-09:30）和盘后（16:00-20:00）"""
         weekday = date(2024, 1, 2)  # 周二
-        start, end = self.adapter.get_trading_hours(weekday)
-        assert start.time() == time(4, 0)   # 盘前开始
-        assert end.time() == time(20, 0)    # 盘后结束
+        sessions = self.adapter.get_trading_hours(weekday)
+        assert isinstance(sessions, list)
+        assert len(sessions) == 1
+        assert sessions[0][0].time() == time(4, 0)
+        assert sessions[0][1].time() == time(20, 0)
 
     # ── 复权 ──
 
@@ -187,7 +241,7 @@ class TestUsMarketAdapter:
             "close": [150.0, 165.0, 165.0],
             "volume": [1000000, 1000000, 1000000],
         })
-        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1))
+        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1), symbol="AAPL")
         assert (result["limit_type"] == "none").all()
 
     # ── 交易日 ──
@@ -218,9 +272,11 @@ class TestCryptoMarketAdapter:
     def test_trading_hours_247(self):
         """加密 24/7 → 整天都是交易日"""
         saturday = date(2024, 1, 6)  # 周六
-        start, end = self.adapter.get_trading_hours(saturday)
-        assert start.date() == saturday
-        assert end.date() == saturday
+        sessions = self.adapter.get_trading_hours(saturday)
+        assert isinstance(sessions, list)
+        assert len(sessions) == 1
+        assert sessions[0][0].date() == saturday
+        assert sessions[0][1].date() == saturday
 
     # ── 复权 ──
 
@@ -241,7 +297,7 @@ class TestCryptoMarketAdapter:
             "close": [50000.0, 60000.0, 60000.0],
             "volume": [1000, 1000, 1000],
         })
-        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1))
+        result = self.adapter.detect_limit_up_down(df, date(2024, 1, 1), symbol="BTC/USDT")
         assert (result["limit_type"] == "none").all()
 
 

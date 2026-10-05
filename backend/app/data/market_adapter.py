@@ -50,7 +50,7 @@ class MarketAdapter(ABC):
         ...
 
     @abstractmethod
-    def get_trading_hours(self, trading_date: date) -> tuple[datetime, datetime] | tuple[None, None]:
+    def get_trading_hours(self, trading_date: date) -> list[tuple[datetime, datetime]]:
         """返回指定日期的交易时段（UTC）
 
         Args:
@@ -86,6 +86,7 @@ class MarketAdapter(ABC):
         self,
         df: pd.DataFrame,
         trading_date: date,
+        symbol: str = "",
     ) -> pd.DataFrame:
         """识别涨跌停并在 DataFrame 新增 limit_type 列
 
@@ -145,16 +146,17 @@ class CnMarketAdapter(MarketAdapter):
             else:
                 exchange = "shenzhen"
         else:
-            exchange = "shanghai"  # 默认
+            raise ValueError(f"未知 A 股 symbol 前缀: {sym}")
 
         return NormalizedSymbol(exchange=exchange, ticker=sym, market="cn")
 
-    def get_trading_hours(self, trading_date: date) -> tuple[datetime, datetime] | tuple[None, None]:
+    def get_trading_hours(self, trading_date: date) -> list[tuple[datetime, datetime]]:
         if not self.is_trading_day(trading_date):
-            return None, None
-        start = datetime.combine(trading_date, time(9, 30))
-        end = datetime.combine(trading_date, time(15, 0))
-        return start, end
+            return []
+        return [
+            (datetime.combine(trading_date, time(9, 30)), datetime.combine(trading_date, time(11, 30))),
+            (datetime.combine(trading_date, time(13, 0)), datetime.combine(trading_date, time(15, 0))),
+        ]
 
     def get_adjust_factor(
         self,
@@ -179,18 +181,19 @@ class CnMarketAdapter(MarketAdapter):
         self,
         df: pd.DataFrame,
         trading_date: date,
+        symbol: str = "",
     ) -> pd.DataFrame:
         df = df.copy()
         pct = self._pct_change(df)
-        # A 股主板 ±10% 涨跌停（创业板 ±20%，此处取 ±10% 简化）
-        # 用 < -9.99 / > 9.99 容差避免浮点精度问题
-        threshold = 9.99
+        # A 股涨跌停阈值：创业板 3 开头 ±20%，其它 ±10%
+        ticker = symbol.strip().upper()
+        threshold = 19.99 if ticker.startswith("3") else 9.99
         df["limit_type"] = "none"
         df.loc[pct > threshold, "limit_type"] = "up"
         df.loc[pct < -threshold, "limit_type"] = "down"
         return df
 
-    def is_trading_day(self, target_date: target_date.__class__) -> bool:  # type: ignore[name-defined]
+    def is_trading_day(self, target_date: date) -> bool:
         # 周末
         if target_date.weekday() >= 5:
             return False
@@ -201,15 +204,72 @@ class CnMarketAdapter(MarketAdapter):
         return True
 
     def _get_holidays(self, year: int) -> set[date]:
-        """获取 A 股年度节假日（简化版：春节 + 国庆，完整应调 akshare）"""
-        # 简化：春节假期首日 + 国庆首日
-        return {
-            date(year, 1, 1),    # 元旦
-            date(year, 5, 1),    # 劳动节
-            date(year, 10, 1),   # 国庆
-            date(year, 10, 2),
-            date(year, 10, 3),
-        }
+        """获取 A 股年度节假日（含调休上班日）
+
+        调休上班日从节假日集合中排除，确保 is_trading_day 正确识别。
+        数据来源：国务院办公厅年度放假安排。
+        """
+        # 调休上班日（周末被指定为工作日，提前从节假日中排除）
+        makeup: set[date] = set()
+        if year == 2026:
+            makeup = {date(2026, 9, 26), date(2026, 10, 8), date(2026, 10, 10), date(2026, 10, 11)}
+        elif year == 2025:
+            makeup = {date(2025, 9, 28), date(2025, 10, 11)}
+        elif year == 2024:
+            makeup = {date(2024, 2, 18), date(2024, 5, 11), date(2024, 9, 29), date(2024, 10, 12)}
+        elif year == 2027:
+            makeup = {date(2027, 2, 7), date(2027, 9, 26), date(2027, 10, 9)}
+
+        # 节假日区间（周末也加入，因调休逻辑统一排除）
+        segments: list[tuple[date, date]] = []
+        if year == 2024:
+            segments = [
+                (date(2024, 1, 1), date(2024, 1, 1)),   # 元旦
+                (date(2024, 2, 10), date(2024, 2, 17)), # 春节
+                (date(2024, 4, 4), date(2024, 4, 6)),  # 清明
+                (date(2024, 5, 1), date(2024, 5, 5)),   # 劳动
+                (date(2024, 6, 10), date(2024, 6, 10)), # 端午
+                (date(2024, 9, 15), date(2024, 9, 17)), # 中秋（补休9/14-16）
+                (date(2024, 10, 1), date(2024, 10, 7)), # 国庆
+            ]
+        elif year == 2025:
+            segments = [
+                (date(2025, 1, 1), date(2025, 1, 1)),   # 元旦
+                (date(2025, 1, 28), date(2025, 2, 4)),  # 春节
+                (date(2025, 4, 4), date(2025, 4, 6)),    # 清明
+                (date(2025, 5, 1), date(2025, 5, 5)),    # 劳动
+                (date(2025, 5, 31), date(2025, 6, 2)),   # 端午
+                (date(2025, 10, 1), date(2025, 10, 8)),  # 国庆（中秋10/6）
+            ]
+        elif year == 2026:
+            # 2026-10-08 中秋节（法定），与国庆连休
+            segments = [
+                (date(2026, 1, 1), date(2026, 1, 1)),   # 元旦
+                (date(2026, 2, 15), date(2026, 2, 21)),  # 春节
+                (date(2026, 4, 4), date(2026, 4, 6)),    # 清明
+                (date(2026, 5, 1), date(2026, 5, 5)),    # 劳动
+                (date(2026, 6, 19), date(2026, 6, 21)),  # 端午
+                (date(2026, 10, 1), date(2026, 10, 8)),  # 国庆（含中秋10/8）
+            ]
+        elif year == 2027:
+            segments = [
+                (date(2027, 1, 1), date(2027, 1, 3)),    # 元旦
+                (date(2027, 2, 7), date(2027, 2, 13)),   # 春节
+                (date(2027, 4, 4), date(2027, 4, 6)),    # 清明
+                (date(2027, 5, 1), date(2027, 5, 3)),    # 劳动
+                (date(2027, 6, 27), date(2027, 6, 29)),  # 端午
+                (date(2027, 9, 20), date(2027, 9, 22)),  # 中秋
+                (date(2027, 10, 1), date(2027, 10, 7)),  # 国庆
+            ]
+
+        holidays: set[date] = set()
+        for start, end in segments:
+            d = start
+            while d <= end:
+                holidays.add(d)
+                d += timedelta(days=1)
+
+        return holidays - makeup  # 调休上班日从节假日中排除
 
 
 # ──────────────── 美股适配器 ────────────────
@@ -228,14 +288,12 @@ class UsMarketAdapter(MarketAdapter):
         sym = symbol.strip().upper()
         return NormalizedSymbol(exchange="US", ticker=sym, market="us")
 
-    def get_trading_hours(self, trading_date: date) -> tuple[datetime, datetime] | tuple[None, None]:
+    def get_trading_hours(self, trading_date: date) -> list[tuple[datetime, datetime]]:
         if not self.is_trading_day(trading_date):
-            return None, None
-        # 盘前 04:00 到盘后 20:00（美东时间，转本地简化处理）
-        # 实际项目应处理夏令时，此处用固定时段
-        start = datetime.combine(trading_date, time(4, 0))
-        end = datetime.combine(trading_date, time(20, 0))
-        return start, end
+            return []
+        return [
+            (datetime.combine(trading_date, time(4, 0)), datetime.combine(trading_date, time(20, 0))),
+        ]
 
     def get_adjust_factor(
         self,
@@ -250,12 +308,13 @@ class UsMarketAdapter(MarketAdapter):
         self,
         df: pd.DataFrame,
         trading_date: date,
+        symbol: str = "",
     ) -> pd.DataFrame:
         df = df.copy()
         df["limit_type"] = "none"
         return df
 
-    def is_trading_day(self, target_date: target_date.__class__) -> bool:  # type: ignore[name-defined]
+    def is_trading_day(self, target_date: date) -> bool:
         # 周末非交易日
         if target_date.weekday() >= 5:
             return False
@@ -308,11 +367,11 @@ class CryptoMarketAdapter(MarketAdapter):
             return "bybit"
         return "binance"  # 默认
 
-    def get_trading_hours(self, trading_date: date) -> tuple[datetime, datetime]:
+    def get_trading_hours(self, trading_date: date) -> list[tuple[datetime, datetime]]:
         """加密 24/7：全天都是交易时段"""
-        start = datetime.combine(trading_date, time(0, 0))
-        end = datetime.combine(trading_date, time(23, 59, 59))
-        return start, end
+        return [
+            (datetime.combine(trading_date, time(0, 0)), datetime.combine(trading_date, time(23, 59, 59))),
+        ]
 
     def get_adjust_factor(
         self,
@@ -327,6 +386,7 @@ class CryptoMarketAdapter(MarketAdapter):
         self,
         df: pd.DataFrame,
         trading_date: date,
+        symbol: str = "",
     ) -> pd.DataFrame:
         df = df.copy()
         df["limit_type"] = "none"

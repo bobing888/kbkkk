@@ -48,7 +48,7 @@ async def get_kline(
     # 3. 多市场涨跌停标记（MarketAdapter 集成）
     try:
         adapter = get_market_adapter(market)
-        df = adapter.detect_limit_up_down(df, pd.Timestamp(end or "today").date())
+        df = adapter.detect_limit_up_down(df, pd.Timestamp(end or "today").date(), symbol)
     except Exception as e:
         logger.warning(f"MarketAdapter limit detection skipped: {e}")
 
