@@ -21,7 +21,7 @@ from app.signals.calibration import (
     MIN_TRAIN_SAMPLES,
     train_calibrator,
 )
-from app.db.models import RecommendationHistory
+from app.models import RecommendationHistory
 
 log = logging.getLogger(__name__)
 

@@ -1,4 +1,10 @@
-"""统计套利指标 — Hurst 指数 + 分形维数 + Shannon 熵"""
+"""统计套利指标 — Hurst 指数 + 分形维数 + Shannon 熵
+
+来源：bobing888/ai-trader (MIT/Apache-2.0) 复用
+原始项目：https://github.com/bobing888/ai-trader
+原始路径：backend/app/analytics/statistical.py
+复用方式：纯 numpy 实现，零外部依赖
+"""
 
 import math
 

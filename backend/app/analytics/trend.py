@@ -1,4 +1,10 @@
-"""趋势强度指标 — ADX + +DI / -DI + MACD + SMA + 多指标共振"""
+"""趋势强度指标 — ADX + +DI / -DI + MACD + SMA + 多指标共振
+
+来源：bobing888/ai-trader (MIT/Apache-2.0) 复用
+原始项目：https://github.com/bobing888/ai-trader
+原始路径：backend/app/analytics/trend.py
+复用方式：纯 numpy 实现，零外部依赖
+"""
 
 from __future__ import annotations
 
@@ -80,6 +86,24 @@ def sma(close: np.ndarray, period: int = 30) -> np.ndarray:
     for i in range(period, n):
         out[i] = out[i - 1] + (close[i] - close[i - period]) / period
     return out
+
+
+def calculate_ma(close: "pd.Series", period: int) -> "pd.Series":
+    """pandas Series 入口的 SMA（供 A3 AnalyticsEngine 调用）。
+
+    Args:
+        close: 价格序列（pd.Series）
+        period: 均线周期
+
+    Returns:
+        pd.Series，长度与输入一致，前 period-1 根为 NaN
+    """
+    import pandas as pd
+    return pd.Series(
+        sma(close.values.astype(np.float64), period),
+        index=close.index,
+        name=f"MA{period}",
+    )
 
 
 def trend_strength(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> dict:
