@@ -7,11 +7,15 @@
     1. AnalyticsEngine.calculate_all(df)
     2. detect_confluence(df)
     3. generate_signal(df)
-    4. 持久化到 RecommendationHistory
+    4. 持久化到 RecommendationHistory（同步 Session 走 executor，避免阻塞事件循环）
     5. emit SignalChangeEvent 到 event_bus
+
+参考 KB github-HKUDS-AI-Trader.md §4 "Transaction-aware audit writes"：
+同步 Session 不直接 await；通过 loop.run_in_executor 把阻塞调用挪到线程池。
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Callable
@@ -83,7 +87,41 @@ class SignalService:
         timeframe: str,
         signals: list[Signal],
     ) -> None:
-        """持久化信号到 DB 并发布事件。"""
+        """持久化信号到 DB 并发布事件。
+
+        同步 DB 调用走 executor，避免阻塞事件循环。
+        """
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(
+                None, self._persist_sync, pair, timeframe, signals
+            )
+            logger.info(
+                "[signal_service] persisted %d signals for %s %s",
+                len(signals), pair, timeframe,
+            )
+        except Exception as e:
+            logger.warning("[signal_service] persist failed: %s", e)
+            raise
+
+        # 5. 发布事件（异步）
+        for sig in signals:
+            event = SignalChangeEvent(
+                pair=pair,
+                timeframe=timeframe,
+                previous=None,
+                current=None,  # type: ignore[assignment]
+                change_type="first_emit",
+            )
+            await self._bus.emit(event)
+
+    def _persist_sync(
+        self,
+        pair: str,
+        timeframe: str,
+        signals: list[Signal],
+    ) -> None:
+        """同步持久化（在线程池中执行）。"""
         db = self._db_factory()
         try:
             for sig in signals:
@@ -102,23 +140,11 @@ class SignalService:
                 db.add(rec)
 
             db.commit()
-            logger.info("[signal_service] persisted %d signals for %s %s", len(signals), pair, timeframe)
-
-            # 5. 发布事件
-            for sig in signals:
-                event = SignalChangeEvent(
-                    pair=pair,
-                    timeframe=timeframe,
-                    previous=None,
-                    current=None,  # type: ignore[assignment]
-                    change_type="first_emit",
-                )
-                await self._bus.emit(event)
-
-        except Exception as e:
-            logger.warning("[signal_service] persist failed: %s", e)
+        except Exception:
             db.rollback()
             raise
+        finally:
+            db.close()
 
     async def get_latest_signals(
         self,
@@ -126,26 +152,22 @@ class SignalService:
         period: str,
         limit: int = 10,
     ) -> list[RecommendationHistory]:
-        """从 DB 读最近信号。
+        """从 DB 读最近信号（线程池执行）。"""
+        loop = asyncio.get_event_loop()
 
-        Args:
-            symbol: 交易对
-            period: 时间周期
-            limit: 返回条数
+        def _query_sync():
+            db = self._db_factory()
+            try:
+                rows = (
+                    db.query(RecommendationHistory)
+                    .where(RecommendationHistory.pair == symbol)
+                    .where(RecommendationHistory.timeframe == period)
+                    .order_by(RecommendationHistory.created_at.desc())
+                    .limit(limit)
+                    .all()
+                )
+                return list(rows)
+            finally:
+                db.close()
 
-        Returns:
-            RecommendationHistory 列表（按 created_at 降序）
-        """
-        db = self._db_factory()
-        try:
-            rows = (
-                db.query(RecommendationHistory)
-                .where(RecommendationHistory.pair == symbol)
-                .where(RecommendationHistory.timeframe == period)
-                .order_by(RecommendationHistory.created_at.desc())
-                .limit(limit)
-                .all()
-            )
-            return list(rows)
-        finally:
-            db.close()
+        return await loop.run_in_executor(None, _query_sync)

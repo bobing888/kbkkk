@@ -26,7 +26,14 @@ except ImportError:
 
 
 class DataFetcher:
-    """统一数据获取接口 - 屏蔽不同市场 API 差异"""
+    """统一数据获取接口 - 屏蔽不同市场 API 差异。
+
+    Provider 注册表（KB github-openbq-org-OpenBB.md §5 "Plugin discovery from metadata"）：
+    新增市场/数据源只需在 _PROVIDERS 注册，无需改 get_kline。
+    """
+
+    # ──────────────── Provider 注册表 ────────────────
+    _PROVIDERS: dict[str, callable] = {}  # type: ignore[type-arg]
 
     def get_kline(
         self,
@@ -37,31 +44,37 @@ class DataFetcher:
         market: Literal['cn', 'us', 'crypto'] = 'cn',
         adjust: Literal['qfq', 'hfq', 'none'] = 'qfq',
     ) -> pd.DataFrame:
-        """
-        统一 K 线数据获取接口
+        """实例方法：与类方法等价，供单例 data_fetcher 调用。
 
-        Args:
-            symbol: 标的代码
-                - A 股: '600519' (不带市场前缀)
-                - 美股: 'AAPL' (不带交易所)
-                - 加密: 'BTC/USDT'
-            period: K线周期
-            start: 起始日期 YYYYMMDD
-            end: 结束日期 YYYYMMDD
-            market: 市场类型
-            adjust: 复权方式（仅 A 股）
-
-        Returns:
-            DataFrame: [datetime, open, high, low, close, volume, amount, ...]
+        所有路由都走 Provider 注册表，避免重复 if/elif。
         """
-        if market == 'cn':
-            return self._get_cn_kline(symbol, period, start, end, adjust)
-        elif market == 'us':
-            return self._get_us_kline(symbol, period, start, end)
-        elif market == 'crypto':
-            return self._get_crypto_kline(symbol, period, start, end)
-        else:
-            raise ValueError(f"Unsupported market: {market}")
+        return DataFetcher.get_kline_route(
+            symbol, period, start, end, market, adjust
+        )
+
+    @classmethod
+    def get_kline_route(
+        cls,
+        symbol: str,
+        period: Literal['1m', '5m', '15m', '30m', '60m', '1d', '1w', '1M'] = '1d',
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        market: Literal['cn', 'us', 'crypto'] = 'cn',
+        adjust: Literal['qfq', 'hfq', 'none'] = 'qfq',
+    ) -> pd.DataFrame:
+        """类方法版本（Provider 路由核心实现）。
+
+        通过 _PROVIDERS 注册表路由到对应市场的 fetch 方法。
+        """
+        provider = cls._PROVIDERS.get(market)
+        if provider is None:
+            available = ", ".join(sorted(cls._PROVIDERS.keys()))
+            raise ValueError(
+                f"Unsupported market: {market}. Available: {available}"
+            )
+        # provider 是 function（未绑定），需要传实例
+        instance = cls()
+        return provider(instance, symbol, period, start, end, adjust)
 
     # ──────────────── A 股 ────────────────
 
@@ -259,10 +272,24 @@ class DataFetcher:
     # ──────────────── 异步封装 ────────────────
 
     async def get_kline_async(self, *args, **kwargs) -> pd.DataFrame:
-        """异步获取 K 线（在事件循环中执行同步 IO）"""
+        """异步获取 K 线（在事件循环中执行同步 IO）
+
+        保持向后兼容：内部调用类方法 DataFetcher.get_kline_route 走 Provider 注册表。
+        """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_kline, *args, **kwargs)
+        return await loop.run_in_executor(
+            None, lambda: DataFetcher.get_kline_route(*args, **kwargs)
+        )
 
 
-# 单例
+# ──────────────── Provider 注册（KB github-openbq-org-OpenBB.md §5）──
+# 每个 (market → method) 一行，新加数据源只改这里
+DataFetcher._PROVIDERS = {
+    "cn": DataFetcher._get_cn_kline,
+    "us": DataFetcher._get_us_kline,
+    "crypto": DataFetcher._get_crypto_kline,
+}
+
+
+# 单例（保留向后兼容：kline.py 直接用 data_fetcher.get_kline(...)）
 data_fetcher = DataFetcher()
