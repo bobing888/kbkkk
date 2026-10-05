@@ -214,7 +214,10 @@ def backtest_kdj_cross_type(
 
     for sample in range(n_samples):
         # 关键：构造更长序列（350 根）以便金叉点后还有 20 日空间
-        df = trend_func(n=350, seed=sample + hash(signal_type) % 10000, **extra_kwargs)
+        # 避免 PYTHONHASHSEED 随机化导致跨进程 seed 不一致
+        # 用 ord 求和比 hash() 更稳定（hash() 在不同 Python 版本间可能有差异）
+        stable_seed_offset = sum(ord(c) for c in signal_type)
+        df = trend_func(n=350, seed=sample + stable_seed_offset % 10000, **extra_kwargs)
         prices = df['close'].values
         k, d, j = calc_kdj(df['high'].values, df['low'].values, prices)
 

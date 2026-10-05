@@ -315,3 +315,118 @@ class CalibrationModel(Base):
     __table_args__ = (
         Index("idx_calibration_lookup", "market", "period", "is_active"),
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 6. 信号推荐历史表（outcome 追踪 + 校准样本来源）
+# ═══════════════════════════════════════════════════════════════
+
+class RecommendationHistory(Base):
+    """信号推荐历史（outcome 追踪 + 校准训练样本来源）。
+
+    设计：
+    - 每生成一个信号写一条记录
+    - outcome_tracker 回填 outcome_label + pnl_pct
+    - calibration_trainer 扫描此表聚合样本训练 PAVA 模型
+    """
+    __tablename__ = "recommendation_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    # 标的 + 周期
+    pair: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    timeframe: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+
+    # 信号核心字段
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)  # long/short
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)  # raw_confidence
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    take_profit: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # 信号来源（逗号分隔或 JSON）
+    signal_sources: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Outcome 回填（outcome_tracker 填充）
+    outcome_label: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, index=True
+    )  # win / loss / timeout / pending
+    pnl_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )
+
+    __table_args__ = (
+        Index("idx_rec_lookup", "pair", "timeframe", "created_at"),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 7. 跟单日志表（auto-follow 订单记录）
+# ═══════════════════════════════════════════════════════════════
+
+class TradeLog(Base):
+    """auto-follow 订单执行记录。
+
+    记录：Signal → Order → TradeLog 完整链路。
+    用于：审计、复盘、风控统计。
+    """
+    __tablename__ = "trade_logs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    # 关联信号（可选：手动单无信号）
+    recommendation_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("recommendation_history.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    signal_sources: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # 标的
+    pair: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)  # long/short
+
+    # 仓位信息
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    notional: Mapped[float] = mapped_column(Float, nullable=False)     # 名义价值
+    risk_amount: Mapped[float] = mapped_column(Float, nullable=False)   # 风险金额
+    risk_pct: Mapped[float] = mapped_column(Float, nullable=False)      # 风险占比
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    take_profit: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # 状态机
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="open", index=True
+    )  # open / closed / cancelled / rejected
+
+    # 平仓信息
+    exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )  # sl / tp / manual / timeout
+    pnl_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pnl_usdt: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # 风控拒绝原因
+    reject_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("idx_trade_status_time", "status", "created_at"),
+        Index("idx_trade_pair", "pair", "status"),
+    )

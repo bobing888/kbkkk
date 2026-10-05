@@ -1,9 +1,12 @@
 """K线数据 API 路由"""
-from fastapi import APIRouter, HTTPException, Query
 from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
+import pandas as pd
 
 from app.services.data_fetcher import data_fetcher
+from app.data.market_adapter import get_market_adapter
 from app.cache import cache_get, cache_set, CacheKey
 from app.db import health_check as db_health
 from app.cache import health_check as redis_health
@@ -42,13 +45,20 @@ async def get_kline(
         logger.error(f"Data fetch error: {e}")
         raise HTTPException(status_code=500, detail=f"数据获取失败: {str(e)}")
 
-    # 3. 转 JSON
+    # 3. 多市场涨跌停标记（MarketAdapter 集成）
+    try:
+        adapter = get_market_adapter(market)
+        df = adapter.detect_limit_up_down(df, pd.Timestamp(end or "today").date(), symbol)
+    except Exception as e:
+        logger.warning(f"MarketAdapter limit detection skipped: {e}")
+
+    # 4. 转 JSON
     data = df.to_dict(orient="records")
     for row in data:
         if "datetime" in row and hasattr(row["datetime"], "isoformat"):
             row["datetime"] = row["datetime"].isoformat()
 
-    # 4. 写缓存（5 分钟）
+    # 5. 写缓存（5 分钟）
     await cache_set(cache_key, data, ttl=300)
 
     return {"source": "fresh", "count": len(data), "data": data}

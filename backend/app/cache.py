@@ -13,14 +13,25 @@ pool = redis.ConnectionPool.from_url(REDIS_URL, max_connections=20, decode_respo
 client = redis.Redis(connection_pool=pool)
 
 
-async def init_redis():
-    """初始化 Redis 连接"""
+async def init_redis() -> bool:
+    """初始化 Redis 连接。
+
+    Redis **可选**——连接失败时记录警告而非抛异常。
+    参考：KB github-HKUDS-AI-Trader.md §4 "Redis is optional"
+
+    Returns:
+        True 连接成功；False 服务降级到无 Redis 模式（仅 cache_* 失效，业务继续）。
+    """
     try:
         await client.ping()
         logger.info("Redis connected")
+        return True
     except Exception as e:
-        logger.error(f"Redis connection failed: {e}")
-        raise
+        logger.warning(
+            f"Redis connection failed: {e}. "
+            "Service continues in degraded mode (cache disabled)."
+        )
+        return False
 
 
 async def close_redis():

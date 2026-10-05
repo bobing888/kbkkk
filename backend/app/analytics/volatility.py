@@ -1,4 +1,10 @@
-"""波动率分位数指标 — ATR + 历史分位"""
+"""波动率分位数指标 — ATR + 历史分位
+
+来源：bobing888/ai-trader (MIT/Apache-2.0) 复用
+原始项目：https://github.com/bobing888/ai-trader
+原始路径：backend/app/analytics/volatility.py
+复用方式：纯 numpy 实现，零外部依赖
+"""
 
 import numpy as np
 
