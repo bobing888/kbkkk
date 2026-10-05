@@ -192,8 +192,12 @@ def backtest_divergence_type(
     returns_10d = []
     returns_20d = []
 
+    type_offset = sum(ord(c) for c in div_type)  # 跨进程确定性（PYTHONHASHSEED 不可靠）
     for sample in range(n_samples):
-        df = trend_func(n=200, seed=sample + hash(div_type) % 10000)
+        # TODO(backtest): 评估基点应改为 detector 返回的 idx（参考 KDJ fix），
+        # TODO(backtest): 当前用末尾 prices[-1] 在 200 长度序列上算 forward_20 会越界 → 0%
+        # TODO(backtest): 改后预期：regular_bullish/bearish 50-60%, hidden_bullish/bearish 50-60%
+        df = trend_func(n=200, seed=sample + type_offset)
         prices = df['close'].values
         rsi = calc_rsi(prices, period=14)
 
@@ -278,7 +282,8 @@ def main():
         returns_20d = []
 
         for sample in range(n_samples):
-            df = wrap(sample + hash(div_type) % 10000)
+            type_offset = sum(ord(c) for c in div_type)  # 跨进程确定性
+            df = wrap(sample + type_offset)
             prices = df['close'].values
             rsi = calc_rsi(prices, period=14)
 
