@@ -94,14 +94,14 @@ def calc_j_confidence(j: float) -> float:
     J > 100（超买）+ 死叉 = 高置信度（0.8-1.0）
     其他 = 中等置信度（0.5-0.7）
     """
-    if j < 0:
+    if j <= 0:  # J=0 也算超卖（边界含入）
         return 0.9  # 超卖金叉，可信度高
-    elif j > 100:
+    elif j >= 100:  # J=100 也算超买（边界含入）
         return 0.4  # 超买金叉，可能是假突破
     elif 20 < j < 80:
         return 0.5  # 中性区，置信度中等
     else:
-        return 0.6
+        return 0.6  # J ∈ [0, 20] ∪ [80, 100] 边界区域
 
 
 def generate_kdj_signal(k: np.ndarray, d: np.ndarray, j: np.ndarray,
@@ -189,7 +189,7 @@ def backtest_kdj_cross_type(
     signal_type: str,
     trend_func,
     n_samples: int = 200,
-    forward_days: int = 10,
+    trend_kwargs: dict = None,
 ) -> dict:
     """
     回测 1 种 KDJ 交叉信号的命中率
@@ -198,12 +198,13 @@ def backtest_kdj_cross_type(
       signal_type: 'golden_cross' / 'death_cross'
       trend_func: 趋势生成函数
       n_samples: 样本数
-      forward_days: 前向天数
+      trend_kwargs: 传给 trend_func 的额外参数（如 with_pullback/with_bounce）
 
     返回: dict 命中率统计
     """
     is_golden = (signal_type == 'golden_cross')
     expected_dir = 'up' if is_golden else 'down'
+    extra_kwargs = trend_kwargs or {}
 
     hits = 0
     total = 0
@@ -213,7 +214,7 @@ def backtest_kdj_cross_type(
 
     for sample in range(n_samples):
         # 关键：构造更长序列（350 根）以便金叉点后还有 20 日空间
-        df = trend_func(n=350, seed=sample + hash(signal_type) % 10000)
+        df = trend_func(n=350, seed=sample + hash(signal_type) % 10000, **extra_kwargs)
         prices = df['close'].values
         k, d, j = calc_kdj(df['high'].values, df['low'].values, prices)
 
@@ -293,64 +294,14 @@ def main():
         print(f"▶ 测试 {signal_type}")
         print(f"  场景: {semantic}")
 
-        n_samples = 200
-        expected_dir = 'up' if signal_type == 'golden_cross' else 'down'
-
-        hits = 0
-        total = 0
-        returns_5d = []
-        returns_10d = []
-        returns_20d = []
-
-        for sample in range(n_samples):
-            # 关键：构造 350 根以便交叉点后有 20 日空间
-            df = trend_func(n=350, seed=sample + hash(signal_type) % 10000)
-            prices = df['close'].values
-            k, d, j = calc_kdj(df['high'].values, df['low'].values, prices)
-
-            if len(k) < 2:
-                continue
-
-            # 找最后一个交叉点（留 20 根空间）
-            cross_idx = None
-            if signal_type == 'golden_cross':
-                for i in range(1, len(k) - 20):
-                    if k[i] > d[i] and k[i-1] <= d[i-1]:
-                        cross_idx = i
-            else:
-                for i in range(1, len(k) - 20):
-                    if k[i] < d[i] and k[i-1] >= d[i-1]:
-                        cross_idx = i
-
-            if cross_idx is None:
-                continue
-
-            total += 1
-            # 正确：以交叉点为基准，计算后续 N 日收益
-            ret_5d = (prices[cross_idx + 5] - prices[cross_idx]) / prices[cross_idx]
-            ret_10d = (prices[cross_idx + 10] - prices[cross_idx]) / prices[cross_idx]
-            ret_20d = (prices[cross_idx + 20] - prices[cross_idx]) / prices[cross_idx]
-            returns_5d.append(ret_5d)
-            returns_10d.append(ret_10d)
-            returns_20d.append(ret_20d)
-
-            actual_dir = 'up' if ret_10d > 0 else 'down'
-            if actual_dir == expected_dir:
-                hits += 1
-
-        hit_rate = hits / total if total > 0 else 0.0
-        result = {
-            'signal_type': signal_type,
-            'total_signals': total,
-            'n_samples': n_samples,
-            'hits': hits,
-            'hit_rate_10d': round(hit_rate, 4),
-            'avg_return_5d': round(float(np.mean(returns_5d) * 100), 2) if returns_5d else 0,
-            'avg_return_10d': round(float(np.mean(returns_10d) * 100), 2) if returns_10d else 0,
-            'avg_return_20d': round(float(np.mean(returns_20d) * 100), 2) if returns_20d else 0,
-            'expected_direction': expected_dir,
-            'semantic': semantic,
-        }
+        # 调用 backtest_kdj_cross_type，避免代码重复
+        result = backtest_kdj_cross_type(
+            signal_type=signal_type,
+            trend_func=trend_func,
+            n_samples=200,
+            trend_kwargs=kwargs,
+        )
+        result['semantic'] = semantic
         results.append(result)
         print(f"  ✓ {result['total_signals']} 个信号 | 命中率(10d) = {result['hit_rate_10d']*100:.1f}%")
         print(f"    平均收益(10d) = {result['avg_return_10d']:+.2f}%")

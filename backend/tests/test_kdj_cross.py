@@ -203,6 +203,15 @@ class TestTrendGeneration:
         df_yes = generate_bullish_trend_with_crossover(n=200, seed=42, with_pullback=True)
         assert df_yes['close'].iloc[-1] < df_no['close'].iloc[-1]
 
+    def test_pullback_scenario_detects_cross(self):
+        """上升趋势末段回撤场景：能识别金叉或死叉（用于假信号场景）"""
+        df = generate_bullish_trend_with_crossover(n=350, seed=42, with_pullback=True)
+        k, d, j = calc_kdj(df['high'].values, df['low'].values, df['close'].values)
+        # 末段回撤场景，应能识别至少一个交叉信号（用于假信号测试）
+        has_golden = bool(detect_kdj_golden_cross(k, d))
+        has_death = bool(detect_kdj_death_cross(k, d))
+        assert has_golden or has_death, "末段回撤场景应至少有一个交叉信号"
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
