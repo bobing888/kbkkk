@@ -1,6 +1,7 @@
 """Redis 缓存管理"""
 import os
 import json
+import hashlib
 from typing import Any, Optional
 import redis.asyncio as redis
 from loguru import logger
@@ -85,24 +86,56 @@ async def health_check() -> bool:
 
 # 缓存 key 约定
 class CacheKey:
-    """统一缓存 key 管理"""
+    """统一缓存 key 管理。
+
+    移植自 KB github-HKUDS-AI-Trader.md §4 "Database-scoped cache keys":
+    > Keys include a configured prefix and database-scope hash,
+    > preventing accidental reuse across deployments sharing Redis.
+
+    三段式：`{PREFIX}:{SCOPE}:{...}`
+    - PREFIX: 环境变量 KBKK_CACHE_PREFIX，默认 "kbkk"
+    - SCOPE: KBKK_DB_URL 的前 8 位 md5（按部署隔离，多环境共享 Redis 不撞 key）
+    - ...: 具体 key 内容
+
+    SCOPE 在每次访问时**重新读取**环境变量，支持 monkeypatch（process / dev)
+    """
+
+    PREFIX = os.getenv("KBKK_CACHE_PREFIX", "kbkk")
+
+    @classmethod
+    def _scope(cls) -> str:
+        """每次访问时计算 SCOPE（支持 monkeypatch + 配置变更）。"""
+        return hashlib.md5(
+            os.getenv("KBKK_DB_URL", "").encode()
+        ).hexdigest()[:8]
+
+    @classmethod
+    def _wrap(cls, suffix: str) -> str:
+        """三段式拼接。"""
+        return f"{cls.PREFIX}:{cls._scope()}:{suffix}"
 
     @staticmethod
     def kline(symbol: str, period: str, start: str, end: str) -> str:
         """K线数据缓存"""
-        return f"kline:{symbol}:{period}:{start}:{end}"
+        return CacheKey._wrap(f"kline:{symbol}:{period}:{start}:{end}")
 
     @staticmethod
     def realtime_quote(symbol: str) -> str:
         """实时行情"""
-        return f"quote:{symbol}"
+        return CacheKey._wrap(f"quote:{symbol}")
 
     @staticmethod
     def signal(symbol: str) -> str:
         """最新信号"""
-        return f"signal:{symbol}"
+        return CacheKey._wrap(f"signal:{symbol}")
 
     @staticmethod
     def indicator(symbol: str, period: str) -> str:
         """指标数据"""
-        return f"indicator:{symbol}:{period}"
+        return CacheKey._wrap(f"indicator:{symbol}:{period}")
+
+    # 向后兼容：保留旧的 _SCOPE 静态访问（测试可能引用）
+    @classmethod
+    @property
+    def _SCOPE(cls) -> str:  # type: ignore[override]
+        return cls._scope()
