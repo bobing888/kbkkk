@@ -82,6 +82,24 @@ def sma(close: np.ndarray, period: int = 30) -> np.ndarray:
     return out
 
 
+def calculate_ma(close: "pd.Series", period: int) -> "pd.Series":
+    """pandas Series 入口的 SMA（供 A3 AnalyticsEngine 调用）。
+
+    Args:
+        close: 价格序列（pd.Series）
+        period: 均线周期
+
+    Returns:
+        pd.Series，长度与输入一致，前 period-1 根为 NaN
+    """
+    import pandas as pd
+    return pd.Series(
+        sma(close.values.astype(np.float64), period),
+        index=close.index,
+        name=f"MA{period}",
+    )
+
+
 def trend_strength(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> dict:
     """返回当前最新点的 ADX 趋势强度分析"""
     a, p, n = adx(high, low, close, period)
