@@ -1,0 +1,73 @@
+groups:
+  - name: kbkkk-api-alerts
+    interval: 30s
+    rules:
+      - alert: ApiHigh5xxRate
+        expr: |
+          sum(rate(http_requests_total{job="backend", status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="backend"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: P1
+          service: kline-api
+        annotations:
+          summary: "K线 API 5xx 错误率超过 5%"
+          description: "5m 错误率 {{ $value | humanizePercentage }}"
+
+      - alert: SignalLatencyHigh
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(follow_signal_duration_seconds_bucket[5m])) by (le)
+          ) > 1.0
+        for: 10m
+        labels:
+          severity: P2
+          service: kline-api
+        annotations:
+          summary: "API p95 延迟 > 1s（持续 10min）"
+          description: "当前 p95: {{ $value | humanizeDuration }}"
+
+      - alert: OrderSuccessRateLow
+        expr: |
+          sum(rate(follow_order_total{status="success"}[10m]))
+          /
+          sum(rate(follow_order_total[10m]))
+          < 0.8
+        for: 5m
+        labels:
+          severity: P1
+          service: auto-follow-worker
+        annotations:
+          summary: "跟单成功率低于 80%（持续 5min）"
+          description: "当前成功率: {{ $value | humanizePercentage }}"
+
+      - alert: BackendHealthCheckFailed
+        expr: up{job="backend"} == 0
+        for: 1m
+        labels:
+          severity: P1
+          service: kline-api
+        annotations:
+          summary: "Backend 健康检查失败（持续 1min）"
+
+      - alert: WorkerHealthCheckFailed
+        expr: up{job="auto-follow-worker"} == 0
+        for: 1m
+        labels:
+          severity: P3
+          service: auto-follow-worker
+        annotations:
+          summary: "Auto-follow-worker 健康检查失败（持续 1min）"
+
+      - alert: ContainerMemoryUsageHigh
+        expr: |
+          container_memory_usage_bytes
+          / container_memory_limit_bytes
+          > 0.85
+        for: 10m
+        labels:
+          severity: P3
+        annotations:
+          summary: "容器内存使用率 > 85%（持续 10min）"
