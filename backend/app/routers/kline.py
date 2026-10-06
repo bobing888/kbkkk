@@ -31,12 +31,16 @@ async def get_kline(
     - 美股日线: GET /api/v1/kline/AAPL?period=1d&market=us
     - 加密日线: GET /api/v1/kline/BTC/USDT?period=1d&market=crypto
     """
-    # 1. 查缓存
+    # 1. 查缓存（cache 不可用时静默降级，直接走 fresh 路径）
     cache_key = CacheKey.kline(symbol, period, start or "default", end or "default")
-    cached = await cache_get(cache_key)
-    if cached:
-        logger.info(f"Cache hit: {cache_key}")
-        return {"source": "cache", "data": cached}
+    try:
+        cached = await cache_get(cache_key)
+        if cached:
+            logger.info(f"Cache hit: {cache_key}")
+            return {"source": "cache", "data": cached}
+    except Exception as e:
+        # 极端防御：cache_get 内部已 try/except 吞异常，理论上不会到这层
+        logger.warning(f"Cache read failed (continuing without cache): {e}")
 
     # 2. 查数据
     try:
@@ -58,8 +62,11 @@ async def get_kline(
         if "datetime" in row and hasattr(row["datetime"], "isoformat"):
             row["datetime"] = row["datetime"].isoformat()
 
-    # 5. 写缓存（5 分钟）
-    await cache_set(cache_key, data, ttl=300)
+    # 5. 写缓存（5 分钟）—— cache 是 best-effort，失败不影响响应
+    try:
+        await cache_set(cache_key, data, ttl=300)
+    except Exception as e:
+        logger.warning(f"Cache write failed for {cache_key} (returning data anyway): {e}")
 
     return {"source": "fresh", "count": len(data), "data": data}
 
