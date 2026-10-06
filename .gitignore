@@ -63,3 +63,10 @@ temp/
 *.whl
 pip-log.txt
 pip-delete-this-directory.txt
+
+# Node (frontend/)
+node_modules/
+dist/
+*.local
+npm-debug.log*
+pnpm-debug.log*

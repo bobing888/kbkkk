@@ -9,13 +9,21 @@
 - 独立运行（不依赖主进程生命周期）
 - 可测试（完全 mock 依赖）
 - 幂等：engine.on_signal 抛错不崩溃 loop
+
+M4 SRE 监控：
+- follow_signal_duration_seconds（Histogram）：信号处理延迟
+- follow_order_total（Counter）：下单次数（按 status=success/fail）
+- follow_notification_total（Counter）：通知投递次数（按 status=success/fail）
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time as time_module
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Callable, Literal, Protocol
+
+from prometheus_client import Counter, Histogram, start_http_server
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -25,6 +33,29 @@ from app.services.event_bus import SignalChangeBus, SignalChangeEvent
 from app.follow.risk_manager import AccountState, Position
 
 logger = logging.getLogger(__name__)
+
+# ── Prometheus metrics ───────────────────────────────────────────────────────
+
+# 信号处理延迟（histogram 支持 p95/p99 查询）
+follow_signal_duration_seconds = Histogram(
+    "follow_signal_duration_seconds",
+    "Signal processing latency in seconds",
+    buckets=(0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0),
+)
+
+# 下单计数器（按结果标签）
+follow_order_total = Counter(
+    "follow_order_total",
+    "Total follow orders",
+    ["status"],  # success | fail
+)
+
+# 通知投递计数器
+follow_notification_total = Counter(
+    "follow_notification_total",
+    "Total notification deliveries",
+    ["status"],  # success | fail
+)
 
 
 # ── 依赖协议 ───────────────────────────────────────────────────────────────
@@ -139,6 +170,7 @@ class FollowWorker:
 
     async def _handle_signal_event(self, event: SignalChangeEvent) -> None:
         """处理单个信号事件：查 DB 最新 Signal → 调用 engine.on_signal"""
+        start_time = time_module.monotonic()
         try:
             logger.info(
                 "[follow_worker] received signal: pair=%s tf=%s type=%s",
@@ -169,6 +201,7 @@ class FollowWorker:
                         event.pair,
                         result.trade_log_id,
                     )
+                    follow_order_total.labels(status="success").inc()
                 else:
                     logger.info(
                         "[follow_worker] signal rejected: pair=%s reason=%s",
@@ -181,10 +214,14 @@ class FollowWorker:
                     event.pair,
                     e,
                 )
+                follow_order_total.labels(status="fail").inc()
                 raise  # 让上层捕获，不吞掉错误
 
         except Exception as e:
             logger.error("[follow_worker] handle_signal error: %s", e)
+        finally:
+            # 记录信号处理延迟（finally 确保无论成功/失败都记录）
+            follow_signal_duration_seconds.observe(time_module.monotonic() - start_time)
 
     def _fetch_latest_signal(self, pair: str, timeframe: str) -> Signal | None:
         """从 DB 查询最近 1 分钟内指定 pair/timeframe 的最新 Signal。
@@ -261,3 +298,107 @@ class FollowWorker:
             await self._engine.on_market_update(prices)
         except Exception as e:
             logger.debug("[follow_worker] _check_sl_tp: %s", e)
+
+
+# ── Worker HTTP 服务（metrics 8001 + health 8002）───────────────────────────
+
+_METRICS_PORT = 8001
+_HEALTH_PORT = 8002
+
+
+def _start_metrics_server(port: int = _METRICS_PORT) -> None:
+    """Prometheus metrics 端点（/metrics），供 prometheus scrape 使用。"""
+    import socket
+    # 先确保端口可用（避免重复启动）
+    with socket.socket() as s:
+        try:
+            s.bind(("0.0.0.0", port))
+        except OSError:
+            logger.warning("[metrics_server] port %d already in use, skipping start", port)
+            return
+    start_http_server(port)
+    logger.info("[metrics_server] listening on http://0.0.0.0:%d/metrics", port)
+
+
+def _run_health_server_sync() -> None:
+    """同步 HTTP server，监听 _HEALTH_PORT，只提供 /health。"""
+    import http.server
+    import socketserver
+
+    class HealthHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/health":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            pass  # 静音，避免 stdout 混乱
+
+    with socketserver.TCPServer(("0.0.0.0", _HEALTH_PORT), HealthHandler) as httpd:
+        logger.info("[health_server] listening on http://0.0.0.0:%d/health", _HEALTH_PORT)
+        httpd.serve_forever()
+
+
+async def _http_servers() -> None:
+    """在独立线程中同时启动 metrics + health server。"""
+    import threading
+
+    # metrics server（prometheus_client 自带，阻塞）
+    metrics_thread = threading.Thread(target=_start_metrics_server, daemon=True)
+    metrics_thread.start()
+    logger.info("[http_servers] metrics thread started")
+
+    # health server（同步阻塞）
+    health_thread = threading.Thread(target=_run_health_server_sync, daemon=True)
+    health_thread.start()
+    logger.info("[http_servers] health thread started")
+
+    # 等待 stop_event
+    await _worker._stop_event.wait()
+    logger.info("[http_servers] stopping")
+
+
+async def main() -> None:
+    """Worker 入口：初始化依赖 + 启动 signal/monitor 循环 + 健康检查 server。"""
+    import logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+
+    from app.db import get_db_session
+    from app.cache import init_redis, close_redis
+    from app.services.event_bus import SignalChangeBus
+    from app.follow.follow_engine import FollowEngine
+
+    redis_ok = await init_redis()
+    logger.info("Redis init: %s", "ok" if redis_ok else "failed")
+
+    db_factory = get_db_session
+    event_bus = SignalChangeBus()
+    engine = FollowEngine(db_factory=db_factory)
+
+    global _worker
+    _worker = FollowWorker(
+        engine=engine,
+        event_bus=event_bus,
+        db_factory=db_factory,
+    )
+
+    # 启动 Prometheus metrics server（后台线程）
+    _start_metrics_server(_METRICS_PORT)
+
+    await _worker.start()
+    await _http_servers()
+    await _worker.stop()
+    await close_redis()
+    logger.info("Worker shutdown complete")
+
+
+_worker: FollowWorker | None = None
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

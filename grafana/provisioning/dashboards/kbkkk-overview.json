@@ -1,0 +1,70 @@
+{
+  "uid": "kbkkk-overview",
+  "title": "KKBKK Overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "5xx Error Rate",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{job=\"backend\",status=~\"5..\"}[5m])) / sum(rate(http_requests_total{job=\"backend\"}[5m]))",
+          "legendFormat": "5xx rate"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "API p95 Latency",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"backend\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Follow Order Success Rate",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 8, "w": 8, "h": 6},
+      "targets": [
+        {
+          "expr": "sum(rate(follow_order_total{status=\"success\"}[10m])) / sum(rate(follow_order_total[10m]))",
+          "legendFormat": "success rate"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Worker Up",
+      "type": "stat",
+      "gridPos": {"x": 8, "y": 8, "w": 8, "h": 6},
+      "targets": [
+        {
+          "expr": "up{job=\"auto-follow-worker\"}",
+          "legendFormat": "worker"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Memory Usage",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 14, "w": 24, "h": 8},
+      "targets": [
+        {
+          "expr": "container_memory_usage_bytes / container_memory_limit_bytes",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    }
+  ]
+}
