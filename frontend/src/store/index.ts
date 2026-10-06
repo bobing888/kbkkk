@@ -1,11 +1,14 @@
 /**
  * Zustand global stores — 全局状态管理
  * M3 3.1: useUIStore / useSymbolStore / useKlineStore
+ * M3 3.4: useSignalsStore（实时 WebSocket 信号）
  * 使用 zustand v5 create() 写法 + TypeScript 严格类型
  */
 import { create } from 'zustand'
 import type { Period, Market } from '../api/klineApi'
 import type { KLineData } from '../types/kline'
+import type { SignalItem } from '../types/analysis'
+import { DEFAULT_ENABLED_INDICATORS, ALL_INDICATOR_NAMES } from '../constants/indicators'
 
 // ─── useUIStore — 外观/侧边栏状态 ───────────────────────────────────────
 
@@ -66,14 +69,7 @@ export const useSymbolStore = create<SymbolStore>((set) => ({
   setMarket: (market) => set({ market }),
 }))
 
-/**
- * useIndicatorsStore — 指标启停状态（M3 3.3 新增）
- * 4 核心默认启用，支持切换/重置
- */
-import {
-  DEFAULT_ENABLED_INDICATORS,
-  ALL_INDICATOR_NAMES,
-} from '../constants/indicators'
+// ─── useIndicatorsStore — 指标启停状态 ─────────────────────────────────────
 
 interface IndicatorsState {
   enabledIndicators: string[]
@@ -102,6 +98,42 @@ export const useIndicatorsStore = create<IndicatorsStore>((set) => ({
 
   setEnabled: (names: string[]) =>
     set({ enabledIndicators: names.filter((n) => ALL_INDICATOR_NAMES.includes(n)) }),
+}))
+
+// ─── useSignalsStore — 实时信号流（M3 3.4）─────────────────────────────────
+// V2 §3.4：WebSocket 接收信号后 addSignal 到此 store
+
+interface SignalsState {
+  signals: SignalItem[]
+  lastUpdated: number | null
+}
+
+interface SignalsActions {
+  addSignal: (signal: SignalItem) => void
+  clear: () => void
+}
+
+export type SignalsStore = SignalsState & SignalsActions
+
+export const useSignalsStore = create<SignalsStore>((set) => ({
+  signals: [],
+  lastUpdated: null,
+
+  addSignal: (signal: SignalItem) =>
+    set((s) => {
+      // 同一 datetime + name 的信号去重
+      const exists = s.signals.some(
+        (ex) => ex.datetime === signal.datetime && ex.name === signal.name
+      )
+      if (exists) return s
+
+      const next = [signal, ...s.signals]
+      // 最多保留 100 条
+      if (next.length > 100) next.length = 100
+      return { signals: next, lastUpdated: Date.now() }
+    }),
+
+  clear: () => set({ signals: [], lastUpdated: null }),
 }))
 
 // ─── useKlineStore — K线数据缓存 ────────────────────────────────────────

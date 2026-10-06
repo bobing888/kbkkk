@@ -1,6 +1,7 @@
 /**
- * K线主图 — M3 3.2 WebGL 升级版
+ * K线主图 — M3 3.2 WebGL 升级版 + M3 3.4 markers 接通
  * V2 §3.2 强制：lightweight-charts v5 WebGL 模式 + 1 万根 50 FPS + 5 类 markers 接通
+ * V2 §3.4 + V2 §10 #8：markers 必须接通 patterns + signals（实时 WebSocket 信号）
  * License: Original work for kbkkk project.
  */
 import { useEffect, useRef, useCallback, type FC } from 'react'
@@ -18,6 +19,7 @@ import { ErrorMessage } from '../common/ErrorMessage'
 import { EmptyState } from '../common/EmptyState'
 import { OHLCTooltip } from './OHLCTooltip'
 import { useResizeObserver } from '../../hooks/useResizeObserver'
+import { useSignalsStore } from '../../store'
 import { createMarkers, type MarkerData } from './markers'
 import type { KLineData, IndicatorType } from '../../types/kline'
 import type { PatternItem } from '../../types/analysis'
@@ -36,6 +38,11 @@ interface KLineChartProps {
   patterns?: PatternItem[]
   /** 信号数据（用于 markers） */
   signals?: SignalItem[]
+}
+
+/** 从 store 获取实时信号（V2 §3.4 WebSocket 实时信号） */
+function useRealtimeSignals(): SignalItem[] {
+  return useSignalsStore((s) => s.signals)
 }
 
 // ─── 性能常量（V2 §3.2 1 万根 50 FPS）─────────────────────────────────────
@@ -59,11 +66,15 @@ export const KLineChart: FC<KLineChartProps> = ({
   error = null,
   indicators = [],
   patterns = [],
-  signals = [],
+  signals: propSignals = [],
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+
+  // V2 §3.4: 合并 props signals + store 实时信号
+  const storeSignals = useRealtimeSignals()
+  const allSignals = [...storeSignals, ...propSignals]
 
   // ── 初始化 chart（v5 API: createChart + addSeries）────────────────────────
   useEffect(() => {
@@ -193,9 +204,10 @@ export const KLineChart: FC<KLineChartProps> = ({
   }, [data])
 
   // ── Markers 更新（V2 §3.2 + V2 §10 #8）────────────────────────────────────
+  // V2 §3.4: markers 100% 接通（patterns + 实时 signals）
   useEffect(() => {
     if (!seriesRef.current) return
-    const markers = createMarkers(patterns, signals)
+    const markers = createMarkers(patterns, allSignals)
     if (markers.length > 0) {
       const lwMarkers: MarkerData[] = markers.map((m) => ({
         ...m,
@@ -211,7 +223,7 @@ export const KLineChart: FC<KLineChartProps> = ({
       }))
       seriesRef.current.setMarkers(formattedMarkers as Parameters<typeof seriesRef.current.setMarkers>[0])
     }
-  }, [patterns, signals])
+  }, [patterns, allSignals])
 
   // ── 指标切换（stub，后续 M3.3 扩展）───────────────────────────────────────
   useEffect(() => {
