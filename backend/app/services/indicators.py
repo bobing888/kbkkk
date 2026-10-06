@@ -95,16 +95,18 @@ class IndicatorEngine:
 
     @staticmethod
     def _calc_obv(df: pd.DataFrame) -> pd.DataFrame:
-        """OBV 能量潮"""
-        obv = [0]
-        for i in range(1, len(df)):
-            if df['close'].iloc[i] > df['close'].iloc[i-1]:
-                obv.append(obv[-1] + df['volume'].iloc[i])
-            elif df['close'].iloc[i] < df['close'].iloc[i-1]:
-                obv.append(obv[-1] - df['volume'].iloc[i])
-            else:
-                obv.append(obv[-1])
-        df['OBV'] = obv
+        """OBV 能量潮（向量化，O(n) 一次性差分 + sign 乘法）。
+
+        等价语义：
+            obv[0] = 0
+            obv[i] = obv[i-1] + sign(close[i] - close[i-1]) * volume[i]
+        """
+        close_diff = df['close'].diff()
+        # np.sign(0) = 0，符合「价格不变时 OBV 不变」的语义
+        direction = np.sign(close_diff).fillna(0)
+        signed_volume = direction * df['volume']
+        # cumsum 从 0 开始，索引 0 的 NaN（因 diff）填 0
+        df['OBV'] = signed_volume.cumsum().fillna(0)
         return df
 
 
