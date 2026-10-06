@@ -11,23 +11,25 @@
 
 ---
 
-## 校正版任务表（v2.0 修订）
+## 校正版任务表（v2.0 修订 — 2026-10-06 更新）
 
-| # | 原始 Arch 项 | 真实状态 | 行动 |
-|---|---|---|---|
-| 1 | `_calc_obv` Python for 循环 | ✅ **已完成**（`2258236`，2026-10-06 13:02）| 无 |
-| 2 | `signal_service.py:69` 内联 `AnalyticsEngine()` | ❌ **no-op**：文件已删（PR #14 + squash 后被吞并）| 无 |
-| 3 | `follow_engine.py:179` `asyncio.run()` 在同步方法 | ❌ **未做**（实测 line 184）| **PR-2A** |
-| 4 | cache.py Redis 失败抛异常 | ✅ **已完成**（`2258236`，含 `_is_available()` 守卫 + `client = None`）| 无 |
-| 5 | `db.py` 仅 PostgreSQL | ❌ 未做 | **PR-3** |
-| 6 | `data_fetcher.py:290` 每次新 `ccxt.binance()` | ❌ 未做 | **PR-2B**（与 #3 同 PR）|
-| 7 | `routers/kline.py:39-42` `cache_set` 失败阻塞 API | ❌ 未做 | **PR-4A** |
-| 8 | analytics/ 无单元测试 | ❌ **误判**：已有 19 个测试 | 无 |
+| # | 原始 Arch 项 | 真实状态 | 行动 | Commit |
+|---|---|---|---|---|
+| 1 | `_calc_obv` Python for 循环 | ✅ **已完成**（`2258236`，2026-10-06 13:02）| 无 | `2258236` |
+| 2 | `signal_service.py:69` 内联 `AnalyticsEngine()` | ❌ **no-op**：文件已删（PR #14 + squash 后被吞并）| 无 | — |
+| 3 | `follow_engine.py:184` `asyncio.run()` 在同步方法 | ✅ **已完成**（PR-2A）| **PR-2A** | `c114a88` |
+| 4 | cache.py Redis 失败抛异常 | ✅ **已完成**（`2258236`，含 `_is_available()` 守卫 + `client = None`）| 无 | `2258236` |
+| 5 | `db.py` 仅 PostgreSQL | ❌ 未做 | **PR-3** | — |
+| 6 | `data_fetcher.py:252` 每次新 `ccxt.binance()` | ✅ **已完成**（PR-2B）| **PR-2B** | `c114a88` |
+| 7 | `routers/kline.py:39-42` `cache_set` 失败阻塞 API | ❌ 未做 | **PR-4A** | — |
+| 8 | analytics/ 无单元测试 | ❌ **误判**：已有 19 个测试 | 无 | — |
 
 **校正要点**：
 - 原始 8 项 → 真实剩 4 项有效工作（#3、#5、#6、#7）
 - #1 + #4 已在 commit `2258236`（PR-1 实际状态）
 - #2 + #8 是 Arch 报告错误，no-op
+- **截至 2026-10-06 13:35**: #3 + #6 已在 `c114a88` 完成
+- 剩余真实工作量: **2 项**（#5 SQLite 1 天 + #7 cache 不阻塞 半天 = 1.5 天）
 
 ---
 
