@@ -9,13 +9,29 @@
  */
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { HomePage } from '../pages/HomePage'
 import { SignalsPage } from '../pages/SignalsPage'
 import { SettingsPage } from '../pages/SettingsPage'
 
+// ─── TanStack Query wrapper ────────────────────────────────────────────────
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+}
+
 describe('HomePage — 首页（K线 + 指标总览）', () => {
   it('渲染 symbol 选择器', () => {
-    render(<HomePage />)
+    const queryClient = createTestQueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <HomePage />
+      </QueryClientProvider>,
+    )
     expect(screen.getByTestId('home-page')).toBeInTheDocument()
     // 有 BTC 按钮
     expect(screen.getByText('BTC')).toBeInTheDocument()

@@ -11,31 +11,50 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { router } from '../router'
 import { Layout } from '../components/Layout'
 import { HomePage } from '../pages/HomePage'
 import { SignalsPage } from '../pages/SignalsPage'
 import { SettingsPage } from '../pages/SettingsPage'
 
-// ─── 用真实 router 测试 ──────────────────────────────────────────────
+// ─── TanStack Query wrapper ────────────────────────────────────────────────
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+}
+
+function renderWithQueryClient(element: React.ReactElement) {
+  return render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      {element}
+    </QueryClientProvider>,
+  )
+}
+
+// ─── 用真实 router 测试 ───────────────────────────────────────────────────
 
 describe('Router — 3 页面路由配置', () => {
   it('根路径 / 渲染 HomePage', () => {
     const memRouter = createMemoryRouter(router.routes, { initialEntries: ['/'] })
-    render(<RouterProvider router={memRouter} />)
+    renderWithQueryClient(<RouterProvider router={memRouter} />)
     // HomePage 有 data-testid="home-page"
     expect(screen.getByTestId('home-page')).toBeInTheDocument()
   })
 
   it('导航到 /signals 渲染 SignalsPage', () => {
     const memRouter = createMemoryRouter(router.routes, { initialEntries: ['/signals'] })
-    render(<RouterProvider router={memRouter} />)
+    renderWithQueryClient(<RouterProvider router={memRouter} />)
     expect(screen.getByTestId('signals-page')).toBeInTheDocument()
   })
 
   it('导航到 /settings 渲染 SettingsPage', () => {
     const memRouter = createMemoryRouter(router.routes, { initialEntries: ['/settings'] })
-    render(<RouterProvider router={memRouter} />)
+    renderWithQueryClient(<RouterProvider router={memRouter} />)
     expect(screen.getByTestId('settings-page')).toBeInTheDocument()
   })
 
@@ -50,7 +69,7 @@ describe('Router — 3 页面路由配置', () => {
         children: routes,
       },
     ], { initialEntries: ['/'] })
-    render(<RouterProvider router={memRouter} />)
+    renderWithQueryClient(<RouterProvider router={memRouter} />)
     // Layout 有 data-testid="glass-navbar"
     expect(screen.getByTestId('glass-navbar')).toBeInTheDocument()
   })

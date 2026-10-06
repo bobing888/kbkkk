@@ -12,13 +12,27 @@ vi.mock('lightweight-charts', () => {
   }
   return {
     createChart: vi.fn(() => ({
-      addSeries: vi.fn(() => mockSeries), // v5 API
+      addSeries: vi.fn(() => mockSeries),
       timeScale: vi.fn(() => ({ fitContent: vi.fn() })),
+      applyOptions: vi.fn(),
       remove: vi.fn(),
+      subscribeCrosshairMove: vi.fn(),
+      unsubscribeCrosshairMove: vi.fn(),
     })),
     CandlestickSeries: { name: 'Candlestick', type: 'Candlestick' as const },
+    CrosshairMode: { Normal: 0, Magnet: 1 },
   }
 })
+
+// Mock useResizeObserver
+vi.mock('../../hooks/useResizeObserver', () => ({
+  useResizeObserver: vi.fn(),
+}))
+
+// Mock useDevicePixelRatio
+vi.mock('../useDevicePixelRatio', () => ({
+  useDevicePixelRatio: vi.fn(() => 1),
+}))
 
 // Mock React Router hooks
 vi.mock('react-router-dom', () => ({
