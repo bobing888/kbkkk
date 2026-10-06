@@ -10,19 +10,21 @@ import { GlassCard } from './ui/GlassCard'
 import { GlassSegmented } from './ui/GlassSegmented'
 import type { SegmentedOption } from './ui/GlassSegmented'
 
-const NAV_OPTIONS: SegmentedOption<'home' | 'signals' | 'settings'>[] = [
+const NAV_OPTIONS: SegmentedOption<'home' | 'signals' | 'patterns' | 'settings'>[] = [
   { value: 'home', label: 'K线' },
   { value: 'signals', label: '信号' },
+  { value: 'patterns', label: '形态' },
   { value: 'settings', label: '设置' },
 ]
 
-function getPathForNav(value: 'home' | 'signals' | 'settings'): string {
+function getPathForNav(value: 'home' | 'signals' | 'patterns' | 'settings'): string {
   return value === 'home' ? '/' : `/${value}`
 }
 
-function getNavFromPath(pathname: string): 'home' | 'signals' | 'settings' {
+function getNavFromPath(pathname: string): 'home' | 'signals' | 'patterns' | 'settings' {
   if (pathname === '/' || pathname === '/home') return 'home'
   if (pathname.startsWith('/signals')) return 'signals'
+  if (pathname.startsWith('/patterns')) return 'patterns'
   if (pathname.startsWith('/settings')) return 'settings'
   return 'home'
 }
@@ -54,7 +56,7 @@ export function Layout() {
                 value={activeNav}
                 onChange={(val) => {
                   const v = Array.isArray(val) ? val[0] : val
-                  window.history.pushState({}, '', getPathForNav(v as 'home' | 'signals' | 'settings'))
+                  window.history.pushState({}, '', getPathForNav(v as 'home' | 'signals' | 'patterns' | 'settings'))
                 }}
                 data-testid="nav-segmented"
               />

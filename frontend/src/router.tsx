@@ -9,6 +9,7 @@ import { createBrowserRouter } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { HomePage } from './pages/HomePage'
 import { SignalsPage } from './pages/SignalsPage'
+import { PatternsPage } from './pages/PatternsPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 export const router = createBrowserRouter([
@@ -19,6 +20,7 @@ export const router = createBrowserRouter([
       { index: true, element: <HomePage /> },
       { path: 'home', element: <HomePage /> },
       { path: 'signals', element: <SignalsPage /> },
+      { path: 'patterns', element: <PatternsPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],
   },

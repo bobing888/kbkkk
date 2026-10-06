@@ -167,3 +167,32 @@ export const useKlineStore = create<KlineStore>((set) => ({
   setLastUpdated: (date) => set({ lastUpdated: date }),
   reset: () => set({ data: undefined, loading: false, error: null, lastUpdated: null }),
 }))
+
+// ─── usePatternsStore — 形态数据（M3 3.5）───────────────────────────────────
+import type { PatternItem } from '../types/analysis'
+
+interface PatternsState {
+  patterns: PatternItem[]
+  loading: boolean
+  error: string | null
+}
+
+interface PatternsActions {
+  setPatterns: (patterns: PatternItem[]) => void
+  setLoading: (loading: boolean) => void
+  setError: (error: string | null) => void
+  clear: () => void
+}
+
+export type PatternsStore = PatternsState & PatternsActions
+
+export const usePatternsStore = create<PatternsStore>((set) => ({
+  patterns: [],
+  loading: false,
+  error: null,
+
+  setPatterns: (patterns) => set({ patterns }),
+  setLoading: (loading) => set({ loading }),
+  setError: (error) => set({ error }),
+  clear: () => set({ patterns: [], loading: false, error: null }),
+}))

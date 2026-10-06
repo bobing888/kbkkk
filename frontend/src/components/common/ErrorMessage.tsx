@@ -6,6 +6,7 @@ interface ErrorMessageProps {
 export function ErrorMessage({ message }: ErrorMessageProps) {
   return (
     <div
+      data-testid="error-message"
       className="w-full h-full flex items-center justify-center"
       role="alert"
     >
