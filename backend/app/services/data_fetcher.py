@@ -161,10 +161,11 @@ class DataFetcher:
 
     # ──────────────── 美股 ────────────────
 
-    def _get_us_kline(self, symbol, period, start, end):
-        """美股数据 - yfinance"""
+    def _get_us_kline(self, symbol, period, start, end, adjust="qfq"):
+        """美股数据 - yfinance（adjust 参数对美股无效，yfinance 自动处理 split）"""
         if yf is None:
             raise ImportError("yfinance is required for US market data")
+        _ = adjust  # 美股仅签名无效
 
         if not start:
             start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
@@ -226,10 +227,11 @@ class DataFetcher:
 
     # ──────────────── 加密货币 ────────────────
 
-    def _get_crypto_kline(self, symbol, period, start, end):
-        """加密货币数据 - ccxt"""
+    def _get_crypto_kline(self, symbol, period, start, end, adjust="qfq"):
+        """加密货币数据 - ccxt（adjust 参数对加密无效，无复权概念）"""
         if ccxt is None:
             raise ImportError("ccxt is required for crypto data")
+        _ = adjust  # 加密仅签名无效
 
         if not start:
             start_dt = datetime.now() - timedelta(days=365)

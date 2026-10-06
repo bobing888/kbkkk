@@ -112,5 +112,30 @@ class TestIndicators:
         assert abs(result['MA5'].iloc[-1] - 18.0) < 0.01
 
 
+class TestProviderArgSignatures:
+    """M5 部署修复：us/crypto 接受 adjust 参数"""
+
+    def test_us_provider_accepts_adjust(self):
+        """美股 provider 接受 adjust 参数（即使忽略）"""
+        import inspect
+        sig = inspect.signature(DataFetcher._get_us_kline)
+        params = list(sig.parameters.keys())
+        assert params == ['self', 'symbol', 'period', 'start', 'end', 'adjust']
+
+    def test_crypto_provider_accepts_adjust(self):
+        """加密 provider 接受 adjust 参数（即使忽略）"""
+        import inspect
+        sig = inspect.signature(DataFetcher._get_crypto_kline)
+        params = list(sig.parameters.keys())
+        assert params == ['self', 'symbol', 'period', 'start', 'end', 'adjust']
+
+    def test_cn_provider_signature_unchanged(self):
+        """A 股 provider 签名不动（含 adjust）"""
+        import inspect
+        sig = inspect.signature(DataFetcher._get_cn_kline)
+        params = list(sig.parameters.keys())
+        assert params == ['self', 'symbol', 'period', 'start', 'end', 'adjust']
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
