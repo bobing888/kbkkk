@@ -17,6 +17,7 @@ numpy>=1.26.0
 sqlalchemy[asyncio]>=2.0.27   # M5 部署修复：greenlet 是 sqlalchemy.ext.asyncio 必需
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.9
+aiosqlite>=0.19.0        # PR-3: dev/test 环境 SQLite adapter
 redis>=5.0.0
 
 # 回测（推迟到 M2.5）
