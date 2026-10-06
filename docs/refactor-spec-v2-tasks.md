@@ -21,7 +21,7 @@
 | 4 | cache.py Redis 失败抛异常 | ✅ **已完成**（`2258236`，含 `_is_available()` 守卫 + `client = None`）| 无 |
 | 5 | `db.py` 仅 PostgreSQL | ❌ 未做 | **PR-3** |
 | 6 | `data_fetcher.py:290` 每次新 `ccxt.binance()` | ❌ 未做 | **PR-2B**（与 #3 同 PR）|
-| 7 | `routers/kline.py:39-42` `cache_set` 失败阻塞 API | ❌ 未做 | **PR-4A** |
+| 7 | `routers/kline.py:39-42` `cache_set` 失败阻塞 API | ✅ **已完成**（PR-4）| **PR-4** | `068a47a` |
 | 8 | analytics/ 无单元测试 | ❌ **误判**：已有 19 个测试 | 无 |
 
 **校正要点**：
