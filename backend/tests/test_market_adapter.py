@@ -261,11 +261,36 @@ class TestCryptoMarketAdapter:
     # ── Symbol 规范化 ──
 
     def test_normalize_crypto_symbol(self):
-        """加密 symbol → exchange=binance, ticker=BTC/USDT"""
+        """加密 symbol → 默认 exchange=okx, ticker=BTC/USDT"""
         result = self.adapter.normalize_symbol("BTC/USDT")
-        assert result["exchange"] == "binance"
+        assert result["exchange"] == "okx"
         assert result["ticker"] == "BTC/USDT"
         assert result["market"] == "crypto"
+
+    def test_normalize_crypto_symbol_explicit_okx(self):
+        """加密 symbol 显式带 OKX 前缀 → exchange=okx"""
+        result = self.adapter.normalize_symbol("OKX:BTC/USDT")
+        assert result["exchange"] == "okx"
+
+    def test_normalize_crypto_symbol_explicit_binance(self):
+        """加密 symbol 显式带 BINANCE 前缀 → exchange=binance"""
+        result = self.adapter.normalize_symbol("BINANCE:BTC/USDT")
+        assert result["exchange"] == "binance"
+
+    def test_normalize_crypto_no_slash_default_okx(self):
+        """加密无斜杠 symbol（BTC）→ 默认交易所 okx"""
+        result = self.adapter.normalize_symbol("BTC")
+        assert result["exchange"] == "okx"
+        assert result["ticker"] == "BTC/USDT"
+
+    def test_normalize_crypto_env_override_binance(self, monkeypatch):
+        """KBKKK_CRYPTO_EXCHANGE=binance → 默认改回 binance（回滚用）"""
+        monkeypatch.setenv("KBKKK_CRYPTO_EXCHANGE", "binance")
+        # 重新创建 adapter 读环境变量
+        from app.data.market_adapter import CryptoMarketAdapter
+        adapter = CryptoMarketAdapter()
+        result = adapter.normalize_symbol("BTC")
+        assert result["exchange"] == "binance"
 
     # ── 交易时间 24/7 ──
 

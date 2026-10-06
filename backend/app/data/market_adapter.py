@@ -7,9 +7,15 @@
 - 三个市场各实现差异（A股含涨跌停+午休+复权 / 美股含盘前盘后 / 加密 24/7）
 - 工厂函数根据 market 参数返回对应实现（依赖注入友好）
 - 颜色方案根据市场返回配色规则（A 股红涨绿跌 / 美股加密绿涨红跌）
+
+M5 部署（feat/okx-default-exchange）：
+- 加密默认交易所从硬编码 "binance" 改为读 KBKKK_CRYPTO_EXCHANGE 环境变量，默认 "okx"
+- 部署 kbkkk-prod 时显式设 KBKKK_CRYPTO_EXCHANGE=okx（部署文档确认）
+- 回滚：设 KBKKK_CRYPTO_EXCHANGE=binance 即可
 """
 from __future__ import annotations
 
+import os
 import pandas as pd
 from abc import ABC, abstractmethod
 from datetime import date, datetime, time, timedelta
@@ -339,10 +345,15 @@ class CryptoMarketAdapter(MarketAdapter):
     """加密货币市场适配器
 
     规则：
-    - Symbol：交易所:base/quote（如 Binance: BTC/USDT）
+    - Symbol：交易所:base/quote（如 OKX:BTC/USDT）
     - 交易时间：24/7 无休
     - 涨跌停：无涨跌停
     - 复权：无复权（币本位天然复权）
+
+    M5 部署（feat/okx-default-exchange）：
+    - 默认交易所读 KBKKK_CRYPTO_EXCHANGE 环境变量，缺省 "okx"
+    - 显式前缀（OKX:BTC/USDT / BINANCE:BTC/USDT）优先级高于环境变量
+    - 回滚：设 KBKKK_CRYPTO_EXCHANGE=binance
     """
 
     def normalize_symbol(self, symbol: str) -> NormalizedSymbol:
@@ -353,11 +364,16 @@ class CryptoMarketAdapter(MarketAdapter):
             exchange = self._detect_exchange(sym)
         else:
             ticker = f"{sym}/USDT"
-            exchange = "binance"  # 默认
+            # M5 部署：默认从环境变量 KBKKK_CRYPTO_EXCHANGE 读，缺省 "okx"
+            exchange = self._default_exchange()
         return NormalizedSymbol(exchange=exchange, ticker=ticker, market="crypto")
 
+    def _default_exchange(self) -> str:
+        """M5 部署：每次调用读环境变量（支持 monkeypatch / hot reload）"""
+        return os.getenv("KBKKK_CRYPTO_EXCHANGE", "okx").lower()
+
     def _detect_exchange(self, symbol: str) -> str:
-        """根据 symbol 推断交易所"""
+        """根据 symbol 推断交易所（显式前缀优先于环境变量）"""
         upper = symbol.upper()
         if "BINANCE" in upper:
             return "binance"
@@ -365,7 +381,8 @@ class CryptoMarketAdapter(MarketAdapter):
             return "okx"
         if "BYBIT" in upper:
             return "bybit"
-        return "binance"  # 默认
+        # M5 部署：兜底走环境变量（默认 okx）
+        return self._default_exchange()
 
     def get_trading_hours(self, trading_date: date) -> list[tuple[datetime, datetime]]:
         """加密 24/7：全天都是交易时段"""
