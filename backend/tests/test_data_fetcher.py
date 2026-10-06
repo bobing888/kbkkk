@@ -137,5 +137,21 @@ class TestProviderArgSignatures:
         assert params == ['self', 'symbol', 'period', 'start', 'end', 'adjust']
 
 
+class TestCryptoExchangeEnv:
+    """M5 部署修复：crypto provider 用 KBKKK_CRYPTO_EXCHANGE 选 ccxt 交易所"""
+
+    def test_crypto_does_not_hardcode_binance(self):
+        """crypto kline 不再硬编码 ccxt.binance()（Binance 在国内被地区限制）"""
+        import inspect
+        source = inspect.getsource(DataFetcher._get_crypto_kline)
+        assert "ccxt.binance()" not in source
+
+    def test_crypto_reads_env_var(self):
+        """crypto kline 读 KBKKK_CRYPTO_EXCHANGE 环境变量"""
+        import inspect
+        source = inspect.getsource(DataFetcher._get_crypto_kline)
+        assert 'os.getenv("KBKKK_CRYPTO_EXCHANGE"' in source
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

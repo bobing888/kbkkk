@@ -1,5 +1,6 @@
 """数据获取服务 - 统一封装 akshare / yfinance / ccxt"""
 import asyncio
+import os
 from datetime import datetime, timedelta
 from typing import Literal, Optional
 import pandas as pd
@@ -251,7 +252,12 @@ class DataFetcher:
         logger.info(f"Fetching crypto kline: {symbol} {period} {start} - {end}")
 
         try:
-            exchange = ccxt.binance()
+            # M5 部署：读 KBKKK_CRYPTO_EXCHANGE 环境变量，默认 okx（PR #19 已改默认值）
+            exchange_name = os.getenv("KBKKK_CRYPTO_EXCHANGE", "okx").lower()
+            exchange_cls = getattr(ccxt, exchange_name, None)
+            if exchange_cls is None:
+                raise ValueError(f"Unsupported ccxt exchange: {exchange_name}")
+            exchange = exchange_cls({"enableRateLimit": True})
             since = int(start_dt.timestamp() * 1000)
             end_ms = int(end_dt.timestamp() * 1000)
             timeframe = timeframe_map.get(period, '1d')
