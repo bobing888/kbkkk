@@ -14,7 +14,7 @@ pandas>=2.0.0
 numpy>=1.26.0
 
 # 数据库
-sqlalchemy>=2.0.27
+sqlalchemy[asyncio]>=2.0.27   # M5 部署修复：greenlet 是 sqlalchemy.ext.asyncio 必需
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.9
 redis>=5.0.0
