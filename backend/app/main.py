@@ -53,7 +53,7 @@ instrumentator = Instrumentator(
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="专业的 K 线趋势分析系统 - 覆盖 A 股 / 美股 / 加密货币",
+    description="BTC/ETH K 线趋势分析系统（SPEC v2 §1）",
     lifespan=lifespan,
     debug=settings.debug,
 )

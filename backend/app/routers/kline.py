@@ -20,16 +20,16 @@ async def get_kline(
     period: Literal['1m', '5m', '15m', '30m', '60m', '1d', '1w', '1M'] = Query("1d"),
     start: str = Query(None, description="起始日期 YYYYMMDD"),
     end: str = Query(None, description="结束日期 YYYYMMDD"),
-    market: Literal['cn', 'us', 'crypto'] = Query("cn"),
-    adjust: Literal['qfq', 'hfq', 'none'] = Query("qfq"),
+    market: Literal['crypto'] = Query("crypto"),
+    adjust: Literal['qfq', 'hfq', 'none'] = Query("none"),
 ):
     """
     获取 K 线数据
 
+    SPEC v2 §1：仅支持 BTC/ETH 加密市场。
     示例:
-    - A股日线: GET /api/v1/kline/600519?period=1d&market=cn
-    - 美股日线: GET /api/v1/kline/AAPL?period=1d&market=us
-    - 加密日线: GET /api/v1/kline/BTC/USDT?period=1d&market=crypto
+    - BTC 日线: GET /api/v1/kline/BTC/USDT?period=1d&market=crypto
+    - ETH 1h: GET /api/v1/kline/ETH/USDT?period=1h&market=crypto
     """
     # 1. 查缓存
     cache_key = CacheKey.kline(symbol, period, start or "default", end or "default")
