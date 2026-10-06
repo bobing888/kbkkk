@@ -1,7 +1,6 @@
 """Redis 缓存管理"""
 import os
 import json
-import hashlib
 from typing import Any, Optional
 import redis.asyncio as redis
 from loguru import logger
@@ -9,20 +8,25 @@ from loguru import logger
 # Redis 配置
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-# 创建连接池
-pool = redis.ConnectionPool.from_url(REDIS_URL, max_connections=20, decode_responses=True)
-client = redis.Redis(connection_pool=pool)
+# 创建连接池（init_redis 之前 client 可能未就绪；用 None 标记降级）
+pool: Optional[redis.ConnectionPool] = None
+client: Optional[redis.Redis] = None
 
 
 async def init_redis() -> bool:
     """初始化 Redis 连接。
 
-    Redis **可选**——连接失败时记录警告而非抛异常。
+    Redis **可选**——连接失败时记录警告而非抛异常，
+    并将 client 设为 None，后续 cache_* 自动降级。
     参考：KB github-HKUDS-AI-Trader.md §4 "Redis is optional"
 
     Returns:
         True 连接成功；False 服务降级到无 Redis 模式（仅 cache_* 失效，业务继续）。
     """
+    global pool, client
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    pool = redis.ConnectionPool.from_url(redis_url, max_connections=20, decode_responses=True)
+    client = redis.Redis(connection_pool=pool)
     try:
         await client.ping()
         logger.info("Redis connected")
@@ -32,20 +36,39 @@ async def init_redis() -> bool:
             f"Redis connection failed: {e}. "
             "Service continues in degraded mode (cache disabled)."
         )
+        client = None  # 降级：后续 cache_* 走 None 分支
         return False
 
 
 async def close_redis():
-    """关闭 Redis 连接"""
-    await client.close()
-    await pool.disconnect()
+    """关闭 Redis 连接（无 client 时跳过）"""
+    global client, pool
+    if client is not None:
+        try:
+            await client.close()
+        except Exception as e:
+            logger.warning(f"Redis close error (ignored): {e}")
+        client = None
+    if pool is not None:
+        try:
+            await pool.disconnect()
+        except Exception as e:
+            logger.warning(f"Redis pool disconnect error (ignored): {e}")
+        pool = None
     logger.info("Redis connection closed")
 
 
+def _is_available() -> bool:
+    """client 是否可用（未降级）。"""
+    return client is not None
+
+
 async def cache_get(key: str) -> Optional[Any]:
-    """获取缓存"""
+    """获取缓存（client 不可用时直接返回 None，业务继续）。"""
+    if not _is_available():
+        return None
     try:
-        value = await client.get(key)
+        value = await client.get(key)  # type: ignore[union-attr]
         if value:
             return json.loads(value)
         return None
@@ -55,9 +78,11 @@ async def cache_get(key: str) -> Optional[Any]:
 
 
 async def cache_set(key: str, value: Any, ttl: int = 300) -> bool:
-    """设置缓存（默认 5 分钟过期）"""
+    """设置缓存（默认 5 分钟过期；client 不可用时返回 False 但不抛异常）。"""
+    if not _is_available():
+        return False
     try:
-        await client.set(key, json.dumps(value, default=str), ex=ttl)
+        await client.set(key, json.dumps(value, default=str), ex=ttl)  # type: ignore[union-attr]
         return True
     except Exception as e:
         logger.error(f"Cache set error: {e}")
@@ -65,9 +90,11 @@ async def cache_set(key: str, value: Any, ttl: int = 300) -> bool:
 
 
 async def cache_delete(key: str) -> bool:
-    """删除缓存"""
+    """删除缓存（client 不可用时返回 False 但不抛异常）。"""
+    if not _is_available():
+        return False
     try:
-        await client.delete(key)
+        await client.delete(key)  # type: ignore[union-attr]
         return True
     except Exception as e:
         logger.error(f"Cache delete error: {e}")
@@ -75,9 +102,11 @@ async def cache_delete(key: str) -> bool:
 
 
 async def health_check() -> bool:
-    """Redis 健康检查"""
+    """Redis 健康检查（client 不可用时返回 False 而非抛异常）。"""
+    if not _is_available():
+        return False
     try:
-        await client.ping()
+        await client.ping()  # type: ignore[union-attr]
         return True
     except Exception as e:
         logger.error(f"Redis health check failed: {e}")
@@ -86,56 +115,24 @@ async def health_check() -> bool:
 
 # 缓存 key 约定
 class CacheKey:
-    """统一缓存 key 管理。
-
-    移植自 KB github-HKUDS-AI-Trader.md §4 "Database-scoped cache keys":
-    > Keys include a configured prefix and database-scope hash,
-    > preventing accidental reuse across deployments sharing Redis.
-
-    三段式：`{PREFIX}:{SCOPE}:{...}`
-    - PREFIX: 环境变量 KBKK_CACHE_PREFIX，默认 "kbkk"
-    - SCOPE: KBKK_DB_URL 的前 8 位 md5（按部署隔离，多环境共享 Redis 不撞 key）
-    - ...: 具体 key 内容
-
-    SCOPE 在每次访问时**重新读取**环境变量，支持 monkeypatch（process / dev)
-    """
-
-    PREFIX = os.getenv("KBKK_CACHE_PREFIX", "kbkk")
-
-    @classmethod
-    def _scope(cls) -> str:
-        """每次访问时计算 SCOPE（支持 monkeypatch + 配置变更）。"""
-        return hashlib.md5(
-            os.getenv("KBKK_DB_URL", "").encode()
-        ).hexdigest()[:8]
-
-    @classmethod
-    def _wrap(cls, suffix: str) -> str:
-        """三段式拼接。"""
-        return f"{cls.PREFIX}:{cls._scope()}:{suffix}"
+    """统一缓存 key 管理"""
 
     @staticmethod
     def kline(symbol: str, period: str, start: str, end: str) -> str:
         """K线数据缓存"""
-        return CacheKey._wrap(f"kline:{symbol}:{period}:{start}:{end}")
+        return f"kline:{symbol}:{period}:{start}:{end}"
 
     @staticmethod
     def realtime_quote(symbol: str) -> str:
         """实时行情"""
-        return CacheKey._wrap(f"quote:{symbol}")
+        return f"quote:{symbol}"
 
     @staticmethod
     def signal(symbol: str) -> str:
         """最新信号"""
-        return CacheKey._wrap(f"signal:{symbol}")
+        return f"signal:{symbol}"
 
     @staticmethod
     def indicator(symbol: str, period: str) -> str:
         """指标数据"""
-        return CacheKey._wrap(f"indicator:{symbol}:{period}")
-
-    # 向后兼容：保留旧的 _SCOPE 静态访问（测试可能引用）
-    @classmethod
-    @property
-    def _SCOPE(cls) -> str:  # type: ignore[override]
-        return cls._scope()
+        return f"indicator:{symbol}:{period}"
