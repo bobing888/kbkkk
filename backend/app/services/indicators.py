@@ -31,34 +31,18 @@ class IndicatorEngine:
     def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
         """一次性计算所有核心指标（仅原始 6 指标族，不含 ADX/ATR/Hurst）。
 
-        实现路径：
-        1. 调用 AnalyticsEngine.calculate_all（全量 17 列）
-        2. Filter → 只保留原始 6 列
-        3. 反向映射：RSI14 → RSI（恢复原始列名，向后兼容）
+        直接调本类内部 _calc_* 纯函数实现，**不依赖** AnalyticsEngine，
+        避免循环依赖（services ↔ analytics）。
+        与 M1 commit e94c1bd 输出列名保持完全一致（向后兼容契约）。
         """
-        # 延迟导入避免循环依赖
-        # analytics/__init__.py → 导入 services.indicators.IndicatorEngine
-        # 若此处直接 import analytics，会产生循环依赖
-        from app.analytics import AnalyticsEngine
-
-        full = AnalyticsEngine.calculate_all(df)
-        # 只保留原始列（过滤掉 ADX14 / ATR14 / Hurst）
-        # 注意事项：AnalyticsEngine 将 RSI 重命名为 RSI14，所以这里用原始列名过滤
-        # 时，RSI 不会被保留；需要先按 AnalyticsEngine 列名（RSI14）暂留，
-        # 再通过反向映射恢复为原始列名 RSI
-        keep_cols = [
-            col for col in full.columns
-            if col in IndicatorEngine._ORIGINAL_COLS
-            or col in ["datetime", "open", "high", "low", "close", "volume"]
-            # AnalyticsEngine 列名也暂留（RSI14），后续反向映射
-            or col in IndicatorEngine._AE_TO_IE_COL_MAP
-        ]
-        result = full[keep_cols].copy()
-        # 反向映射：AnalyticsEngine.rename → 恢复 IndicatorEngine 原始列名
-        for ae_col, ie_col in IndicatorEngine._AE_TO_IE_COL_MAP.items():
-            if ae_col in result.columns and ie_col not in result.columns:
-                result[ie_col] = result.pop(ae_col)
-        return result
+        df = df.copy()
+        df = IndicatorEngine._calc_ma(df)
+        df = IndicatorEngine._calc_macd(df)
+        df = IndicatorEngine._calc_rsi(df)
+        df = IndicatorEngine._calc_boll(df)
+        df = IndicatorEngine._calc_kdj(df)
+        df = IndicatorEngine._calc_obv(df)
+        return df
 
     @staticmethod
     def _calc_ma(df: pd.DataFrame, periods: Tuple[int, ...] = (5, 10, 20, 60, 120, 250)) -> pd.DataFrame:
