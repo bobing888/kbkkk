@@ -332,7 +332,8 @@ def _make_engine_for_close(
 
 
 class TestOnMarketUpdate:
-    def test_sl_triggers_close(self) -> None:
+    @pytest.mark.asyncio
+    async def test_sl_triggers_close(self) -> None:
         """long 持仓：价格跌至 SL → 触发平仓"""
         mock_trade = MagicMock()
         mock_trade.id = 1
@@ -347,13 +348,14 @@ class TestOnMarketUpdate:
         engine = _make_engine_for_market_update([mock_trade])
 
         # 价格跌至 97（< SL=98）
-        results = engine.on_market_update({"BTCUSDT": 97.0})
+        results = await engine.on_market_update({"BTCUSDT": 97.0})
 
         assert len(results) == 1
         assert results[0].exit_reason == "sl"
         assert results[0].exit_price == 97.0
 
-    def test_tp_triggers_close(self) -> None:
+    @pytest.mark.asyncio
+    async def test_tp_triggers_close(self) -> None:
         """long 持仓：价格上涨至 TP → 触发平仓"""
         mock_trade = MagicMock()
         mock_trade.id = 2
@@ -368,12 +370,13 @@ class TestOnMarketUpdate:
         engine = _make_engine_for_market_update([mock_trade])
 
         # 价格涨至 111（> TP=110）
-        results = engine.on_market_update({"ETHUSDT": 111.0})
+        results = await engine.on_market_update({"ETHUSDT": 111.0})
 
         assert len(results) == 1
         assert results[0].exit_reason == "tp"
 
-    def test_no_trigger_returns_empty(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_trigger_returns_empty(self) -> None:
         """价格未触 SL/TP → 无平仓"""
         mock_trade = MagicMock()
         mock_trade.id = 3
@@ -388,11 +391,12 @@ class TestOnMarketUpdate:
         engine = _make_engine_for_market_update([mock_trade])
 
         # 价格在 SL 和 TP 之间
-        results = engine.on_market_update({"BTCUSDT": 105.0})
+        results = await engine.on_market_update({"BTCUSDT": 105.0})
 
         assert len(results) == 0
 
-    def test_multiple_positions_batch_check(self) -> None:
+    @pytest.mark.asyncio
+    async def test_multiple_positions_batch_check(self) -> None:
         """多持仓批量检查"""
         trade1 = MagicMock()
         trade1.id = 1
@@ -417,7 +421,7 @@ class TestOnMarketUpdate:
         engine = _make_engine_for_market_update([trade1, trade2])
 
         # BTC SL 触发，ETH 未触
-        results = engine.on_market_update({"BTCUSDT": 97.0, "ETHUSDT": 100.0})
+        results = await engine.on_market_update({"BTCUSDT": 97.0, "ETHUSDT": 100.0})
 
         assert len(results) == 1
         assert results[0].pair == "BTCUSDT"
@@ -483,7 +487,8 @@ class TestSLTPBoundary:
 # ── 测试 12：多持仓只平一个 ─────────────────────────────────────────────
 
 class TestMultiplePositions:
-    def test_only_triggered_position_closed(self) -> None:
+    @pytest.mark.asyncio
+    async def test_only_triggered_position_closed(self) -> None:
         """多持仓中只有 1 个触 SL → 只平 1 个"""
         trade_hit = MagicMock()
         trade_hit.id = 1
@@ -508,7 +513,7 @@ class TestMultiplePositions:
         engine = _make_engine_for_market_update([trade_hit, trade_miss])
 
         # BTC SL 触发，ETH 未触
-        results = engine.on_market_update({"BTCUSDT": 97.0, "ETHUSDT": 105.0})
+        results = await engine.on_market_update({"BTCUSDT": 97.0, "ETHUSDT": 105.0})
 
         assert len(results) == 1
         assert results[0].trade_log_id == 1
@@ -519,7 +524,8 @@ class TestMultiplePositions:
 class TestOnMarketUpdateClosePosition:
     """C2: follow_engine.on_market_update 必须真实市价平仓 + 行锁幂等"""
 
-    def test_close_open_position_calls_market_adapter_with_reverse_direction(self) -> None:
+    @pytest.mark.asyncio
+    async def test_close_open_position_calls_market_adapter_with_reverse_direction(self) -> None:
         """SL/TP 触发 → 调用 adapter.place_market_order，反向平仓"""
         mock_trade = MagicMock()
         mock_trade.id = 1
@@ -539,7 +545,7 @@ class TestOnMarketUpdateClosePosition:
         }
 
         engine = _make_engine_for_close(mock_trade, mock_adapter)
-        results = engine.on_market_update({"BTCUSDT": 97.0})
+        results = await engine.on_market_update({"BTCUSDT": 97.0})
 
         # 验证：adapter 被调用，方向反向（long → short）
         mock_adapter.place_market_order.assert_called_once()
@@ -551,7 +557,8 @@ class TestOnMarketUpdateClosePosition:
         assert len(results) == 1
         assert results[0].exit_reason == "sl"
 
-    def test_close_failed_does_not_commit(self) -> None:
+    @pytest.mark.asyncio
+    async def test_close_failed_does_not_commit(self) -> None:
         """adapter.place_market_order 失败 → 不 commit DB，保留 open 状态"""
         mock_trade = MagicMock()
         mock_trade.id = 2
@@ -568,7 +575,7 @@ class TestOnMarketUpdateClosePosition:
         mock_adapter.place_market_order.side_effect = RuntimeError("network error")
 
         engine = _make_engine_for_close(mock_trade, mock_adapter)
-        results = engine.on_market_update({"ETHUSDT": 97.0})
+        results = await engine.on_market_update({"ETHUSDT": 97.0})
 
         # 验证：adapter 被调用
         mock_adapter.place_market_order.assert_called_once()
@@ -577,7 +584,8 @@ class TestOnMarketUpdateClosePosition:
         # 验证：trade 状态仍为 open（失败不 commit）
         assert mock_trade.status == "open"
 
-    def test_close_already_closed_skipped(self) -> None:
+    @pytest.mark.asyncio
+    async def test_close_already_closed_skipped(self) -> None:
         """已 closed 状态不应再次平仓（幂等）"""
         mock_trade = MagicMock()
         mock_trade.id = 3
@@ -594,13 +602,14 @@ class TestOnMarketUpdateClosePosition:
         engine = _make_engine_for_close(mock_trade, mock_adapter)
         # 初始状态 returned_closed=True → lock 返回 None，幂等跳过
         engine._close_test_state["returned_closed"] = True
-        results = engine.on_market_update({"BTCUSDT": 97.0})
+        results = await engine.on_market_update({"BTCUSDT": 97.0})
 
         # 验证：未调用 adapter（幂等跳过）
         mock_adapter.place_market_order.assert_not_called()
         assert len(results) == 0
 
-    def test_concurrent_close_protected_by_row_lock(self) -> None:
+    @pytest.mark.asyncio
+    async def test_concurrent_close_protected_by_row_lock(self) -> None:
         """并发平仓：with_for_update 行锁防止重复平仓。
 
         场景：第二个 worker 同时检查同一持仓 → lock 冲突（返回 None）→ 幂等跳过。
@@ -655,12 +664,13 @@ class TestOnMarketUpdateClosePosition:
         )
 
         # lock 冲突 → 不平仓，不调用 adapter
-        results = engine.on_market_update({"BTCUSDT": 97.0})
+        results = await engine.on_market_update({"BTCUSDT": 97.0})
         assert len(results) == 0, "lock conflict should skip close"
         assert not adapter_called, "adapter should NOT be called when lock fails"
         assert wfu_called, "with_for_update must be called for row lock"
 
-    def test_close_persists_exit_order_id(self) -> None:
+    @pytest.mark.asyncio
+    async def test_close_persists_exit_order_id(self) -> None:
         """平仓成功后，exit_order_id 必须记录在 trade 上"""
         mock_trade = MagicMock()
         mock_trade.id = 5
@@ -681,8 +691,37 @@ class TestOnMarketUpdateClosePosition:
         }
 
         engine = _make_engine_for_close(mock_trade, mock_adapter)
-        results = engine.on_market_update({"BTCUSDT": 97.0})
+        results = await engine.on_market_update({"BTCUSDT": 97.0})
 
         assert len(results) == 1
         # 验证：exit_order_id 被记录
         assert mock_trade.exit_order_id == "exit-456"
+
+    @pytest.mark.asyncio
+    async def test_on_market_update_idempotent_on_repeated_calls(self) -> None:
+        """PR-2A 回归测试：on_market_update 改为 async 后，连续 10 次调用不抛异常。
+
+        原同步包装 + asyncio.run() 在 event loop 内调用会抛
+        'asyncio.run() cannot be called from a running event loop'。
+        改 async 后，应能在 event loop 内被反复 await。
+        """
+        mock_trade = MagicMock()
+        mock_trade.id = 6
+        mock_trade.pair = "BTCUSDT"
+        mock_trade.direction = "long"
+        mock_trade.entry_price = 100.0
+        mock_trade.stop_loss = 98.0
+        mock_trade.take_profit = 110.0
+        mock_trade.notional = 1000.0
+        mock_trade.quantity = 10.0
+        mock_trade.status = "closed"  # 已关闭 → 幂等跳过，不调 adapter
+
+        mock_adapter = AsyncMock()
+        engine = _make_engine_for_close(mock_trade, mock_adapter)
+        engine._close_test_state["returned_closed"] = True
+
+        # 连续 10 次 await 都不应抛 RuntimeError
+        for _ in range(10):
+            results = await engine.on_market_update({"BTCUSDT": 97.0})
+            assert results == []
+        mock_adapter.place_market_order.assert_not_called()

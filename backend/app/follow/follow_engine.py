@@ -161,7 +161,7 @@ class FollowEngine:
             entry_price=entry_price,
         )
 
-    def on_market_update(
+    async def on_market_update(
         self,
         current_prices: dict[str, float],
     ) -> list[CloseResult]:
@@ -173,7 +173,9 @@ class FollowEngine:
         - adapter 失败则不 commit（保留 open 状态供重试）
         - 成功时记录 exit_order_id
 
-        内部用 asyncio.run() 调用异步 adapter.place_market_order。
+        async 化（v2 SPEC PR-2A）：原同步包装 + asyncio.run() 会与
+        follow_worker 的事件循环嵌套，本方法改为 async def，由 caller await。
+        KB 参考：vibetrading-implementation-ready.md §"async hook for periodic tasks"
 
         Args:
             current_prices: {pair: current_price}
@@ -181,7 +183,7 @@ class FollowEngine:
         Returns:
             CloseResult 列表（所有触发的平仓）
         """
-        return asyncio.run(self._on_market_update_async(current_prices))
+        return await self._on_market_update_async(current_prices)
 
     async def _on_market_update_async(
         self,

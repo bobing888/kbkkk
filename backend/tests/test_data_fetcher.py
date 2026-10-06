@@ -96,6 +96,37 @@ class TestDataFetcher:
         assert len(df) == 3
         assert df['close'].iloc[-1] == 152.0
 
+    def test_ccxt_exchange_cached_per_name(self):
+        """PR-2B 回归测试：_get_exchange 同一 name 返回同一对象（连接复用）。
+
+        原实现：每次 fetch 都新建 ccxt.binance()，浪费 100ms+ 连接建立时间。
+        新实现：类级 _EXCHANGE_CACHE 复用，100 次连续调用只创建 1 次。
+        """
+        from app.services.data_fetcher import DataFetcher
+        # 清空 cache（之前测试可能注入）
+        DataFetcher._EXCHANGE_CACHE.clear()
+
+        ex1 = DataFetcher._get_exchange("binance")
+        ex2 = DataFetcher._get_exchange("binance")
+        ex3 = DataFetcher._get_exchange("okx")  # 不同 name → 新对象
+
+        # 同 name → 同一对象
+        assert ex1 is ex2, "同 name 应返回缓存对象"
+        # 不同 name → 不同对象
+        assert ex1 is not ex3, "不同 name 应创建新对象"
+        # cache 大小正确
+        assert len(DataFetcher._EXCHANGE_CACHE) == 2
+        assert "binance" in DataFetcher._EXCHANGE_CACHE
+        assert "okx" in DataFetcher._EXCHANGE_CACHE
+
+    def test_ccxt_exchange_uses_rate_limit(self):
+        """PR-2B：ccxt exchange 启用 rate limit（避免触发交易所 429）。"""
+        from app.services.data_fetcher import DataFetcher
+        DataFetcher._EXCHANGE_CACHE.clear()
+        ex = DataFetcher._get_exchange("binance")
+        # ccxt.Exchange.enableRateLimit=True → exchange.rateLimit > 0
+        assert ex.rateLimit > 0, "应启用 rate limit"
+
 
 class TestIndicators:
     """指标计算测试（基础）"""

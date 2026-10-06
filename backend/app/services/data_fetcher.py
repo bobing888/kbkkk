@@ -35,6 +35,26 @@ class DataFetcher:
     # ──────────────── Provider 注册表 ────────────────
     _PROVIDERS: dict[str, callable] = {}  # type: ignore[type-arg]
 
+    # ──────────────── ccxt exchange 单例缓存（PR-2B）────────────
+    # KB 参考：vibetrading-implementation-ready.md §"Lazy provider registry"
+    # 避免每次 fetch_ohlcv 都新建 ccxt.binance() 重新建立连接
+    _EXCHANGE_CACHE: dict[str, "ccxt.Exchange"] = {}  # type: ignore[name-defined]
+
+    @classmethod
+    def _get_exchange(cls, name: str):
+        """获取 ccxt exchange 实例（带缓存）。
+
+        Args:
+            name: 交易所名（小写），如 "binance" / "okx"
+
+        Returns:
+            ccxt.Exchange 实例
+        """
+        if name not in cls._EXCHANGE_CACHE:
+            logger.debug(f"Creating new ccxt exchange: {name}")
+            cls._EXCHANGE_CACHE[name] = getattr(ccxt, name)({"enableRateLimit": True})
+        return cls._EXCHANGE_CACHE[name]
+
     def get_kline(
         self,
         symbol: str,
@@ -249,7 +269,7 @@ class DataFetcher:
         logger.info(f"Fetching crypto kline: {symbol} {period} {start} - {end}")
 
         try:
-            exchange = ccxt.binance()
+            exchange = self._get_exchange("binance")
             since = int(start_dt.timestamp() * 1000)
             end_ms = int(end_dt.timestamp() * 1000)
             timeframe = timeframe_map.get(period, '1d')
