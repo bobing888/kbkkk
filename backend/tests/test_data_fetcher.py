@@ -152,6 +152,14 @@ class TestCryptoExchangeEnv:
         source = inspect.getsource(DataFetcher._get_crypto_kline)
         assert 'os.getenv("KBKKK_CRYPTO_EXCHANGE"' in source
 
+    def test_crypto_normalizes_symbol_with_quote(self):
+        """BTC 自动补 /USDT（Binance 用 BTCUSDT，OKX 用 BTC/USDT，kbkkk API 默认 BTC）"""
+        import inspect
+        source = inspect.getsource(DataFetcher._get_crypto_kline)
+        # 验证 ccxt_symbol 逻辑存在
+        assert "ccxt_symbol" in source
+        assert '"/USDT"' in source or 'f"{symbol}/USDT"' in source
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

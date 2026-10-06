@@ -258,13 +258,18 @@ class DataFetcher:
             if exchange_cls is None:
                 raise ValueError(f"Unsupported ccxt exchange: {exchange_name}")
             exchange = exchange_cls({"enableRateLimit": True})
+
+            # OKX 现货要求 "BTC/USDT" 格式，无斜杠时自动补 /USDT（PR #25 部署修复）
+            ccxt_symbol = symbol if "/" in symbol else f"{symbol}/USDT"
+            logger.debug(f"ccxt symbol: {symbol} -> {ccxt_symbol}")
+
             since = int(start_dt.timestamp() * 1000)
             end_ms = int(end_dt.timestamp() * 1000)
             timeframe = timeframe_map.get(period, '1d')
 
             all_ohlcv = []
             while since < end_ms:
-                ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=1000)
+                ohlcv = exchange.fetch_ohlcv(ccxt_symbol, timeframe, since=since, limit=1000)
                 if not ohlcv:
                     break
                 all_ohlcv.extend(ohlcv)
