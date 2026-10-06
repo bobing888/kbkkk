@@ -18,6 +18,8 @@ export interface GlassCardProps {
   padding?: 'none' | 'sm' | 'md' | 'lg'
   /** Show hover shadow transition */
   hoverable?: boolean
+  /** onClick handler */
+  onClick?: () => void
   /** data-testid for testing */
   'data-testid'?: string
 }
@@ -38,18 +40,24 @@ export function GlassCard({
   className = '',
   padding = 'md',
   hoverable = false,
+  onClick,
   'data-testid': testId,
 }: GlassCardProps) {
   return (
     <div
       data-testid={testId}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') onClick() } : undefined}
       className={[
         'relative rounded-kbkkk-lg overflow-hidden',
         'bg-[var(--glass-bg)]',
         'border border-[var(--glass-border)]',
         'shadow-glass',
         'backdrop-blur-glass',
-        hoverable ? 'transition-shadow duration-200 hover:shadow-glass-hover cursor-pointer' : '',
+        hoverable || onClick ? 'transition-shadow duration-200 hover:shadow-glass-hover cursor-pointer' : '',
+        onClick ? 'select-none' : '',
         PADDING_MAP[padding],
         className,
       ]

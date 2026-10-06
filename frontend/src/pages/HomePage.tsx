@@ -1,6 +1,7 @@
 /**
  * HomePage — 首页（K线 + 指标总览）
  * M3 3.2: 升级为真实 KLineChart 主图（WebGL 10k 50fps）
+ * M3 3.3: 9 指标 panel 切换 + 11 指标 + 玻璃卡 + 骨架屏
  *
  * BTC/ETH only（V2 §1 强制）
  * 暗色强制（V2 §3.0 不变量）
@@ -9,9 +10,13 @@ import { useSymbolStore } from '../store'
 import { useKLineData } from '../hooks/useKlineData'
 import { usePatterns } from '../hooks/useAnalysis'
 import { useSignals } from '../hooks/useAnalysis'
+import { useIndicators } from '../hooks/useAnalysis'
 import { GlassCard } from '../components/ui/GlassCard'
 import { GlassSegmented } from '../components/ui/GlassSegmented'
 import { KLineChart } from '../components/KLineChart/index'
+import { IndicatorPanel } from '../components/indicators/IndicatorPanel'
+import { useIndicatorsStore } from '../store'
+import type { IndicatorsData } from '../types/analysis'
 
 const SYMBOL_OPTIONS = [
   { value: 'BTC', label: 'BTC' },
@@ -27,10 +32,11 @@ const PERIOD_OPTIONS = [
   { value: '15m', label: '15m' },
 ] as const
 
-const INDICATOR_NAMES = ['MACD', 'KDJ', 'RSI', '布林带'] as const
+// INDICATOR_NAMES removed — M3 3.3 now uses IndicatorPanel with 11 indicators
 
 export function HomePage() {
   const { symbol, period, market, setSymbol, setPeriod } = useSymbolStore()
+  const { enabledIndicators, toggle } = useIndicatorsStore()
 
   // ── K线数据（TanStack Query，5 min staleTime）────────────────────────────
   const klineQuery = useKLineData({ symbol, period, market })
@@ -38,12 +44,19 @@ export function HomePage() {
   const patternsQuery = usePatterns(symbol, period, market, 30)
   // ── Signals（用于 markers，V2 §10 #8）─────────────────────────────────
   const signalsQuery = useSignals(symbol, period, market)
+  // ── Indicators（M3 3.3 接入真实数据）────────────────────────────────────
+  const indicatorsQuery = useIndicators(symbol, period, market)
 
   // symbol 变化时同步到 store
   const handleSymbolChange = (val: string | string[]) => {
     const v = Array.isArray(val) ? val[0] : val
     setSymbol(v)
   }
+
+  // 将 IndicatorsResponse 转换为 IndicatorPanel 需要的 Record<string, IndicatorsData[string]>
+  const indicatorData: Record<string, IndicatorsData[string]> = indicatorsQuery.data
+    ? indicatorsQuery.data.indicators
+    : {}
 
   return (
     <div data-testid="home-page" className="space-y-4">
@@ -99,20 +112,16 @@ export function HomePage() {
         </div>
       </GlassCard>
 
-      {/* 4 个核心指标卡（stub，M3.3 接入真实指标） */}
-      <div>
-        <p className="text-xs text-kbkkk-muted mb-2 uppercase tracking-wider">技术指标</p>
-        <div className="grid grid-cols-2 gap-2">
-          {INDICATOR_NAMES.map((name) => (
-            <GlassCard key={name} padding="sm" hoverable>
-              <div className="text-center">
-                <p className="text-xs text-kbkkk-muted mb-1">{name}</p>
-                <p className="text-lg font-semibold text-kbkkk-text">—</p>
-              </div>
-            </GlassCard>
-          ))}
-        </div>
-      </div>
+      {/* 指标面板（M3 3.3 接入真实指标 + 玻璃卡） */}
+      <GlassCard padding="md">
+        <IndicatorPanel
+          enabledIndicators={enabledIndicators}
+          onToggle={toggle}
+          data={indicatorData}
+          loading={indicatorsQuery.isLoading}
+          error={indicatorsQuery.isError ? '加载指标数据失败' : null}
+        />
+      </GlassCard>
     </div>
   )
 }

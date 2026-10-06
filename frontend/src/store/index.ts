@@ -66,6 +66,44 @@ export const useSymbolStore = create<SymbolStore>((set) => ({
   setMarket: (market) => set({ market }),
 }))
 
+/**
+ * useIndicatorsStore — 指标启停状态（M3 3.3 新增）
+ * 4 核心默认启用，支持切换/重置
+ */
+import {
+  DEFAULT_ENABLED_INDICATORS,
+  ALL_INDICATOR_NAMES,
+} from '../constants/indicators'
+
+interface IndicatorsState {
+  enabledIndicators: string[]
+}
+
+interface IndicatorsActions {
+  toggle: (name: string) => void
+  reset: () => void
+  setEnabled: (names: string[]) => void
+}
+
+export type IndicatorsStore = IndicatorsState & IndicatorsActions
+
+export const useIndicatorsStore = create<IndicatorsStore>((set) => ({
+  // 4 核心默认（V2 §3.3 强制）
+  enabledIndicators: [...DEFAULT_ENABLED_INDICATORS],
+
+  toggle: (name: string) =>
+    set((s) => ({
+      enabledIndicators: s.enabledIndicators.includes(name)
+        ? s.enabledIndicators.filter((n) => n !== name)
+        : [...s.enabledIndicators, name],
+    })),
+
+  reset: () => set({ enabledIndicators: [...DEFAULT_ENABLED_INDICATORS] }),
+
+  setEnabled: (names: string[]) =>
+    set({ enabledIndicators: names.filter((n) => ALL_INDICATOR_NAMES.includes(n)) }),
+}))
+
 // ─── useKlineStore — K线数据缓存 ────────────────────────────────────────
 
 interface KlineState {
