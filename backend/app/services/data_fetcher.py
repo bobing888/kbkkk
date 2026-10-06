@@ -1,4 +1,7 @@
-"""数据获取服务 - 统一封装 akshare / yfinance / ccxt"""
+"""数据获取服务 - 统一封装 ccxt（Binance/OKX，优先 OKX）。
+
+SPEC v2 §1：聚焦 BTC/ETH（crypto），A 股 akshare / 美股 yfinance 链路已砍。
+"""
 import asyncio
 import os
 from datetime import datetime, timedelta
@@ -8,18 +11,6 @@ from loguru import logger
 
 # 延迟导入（避免启动时的依赖问题）
 try:
-    import akshare as ak
-except ImportError:
-    logger.warning("akshare not installed, A股数据不可用")
-    ak = None
-
-try:
-    import yfinance as yf
-except ImportError:
-    logger.warning("yfinance not installed, 美股数据不可用")
-    yf = None
-
-try:
     import ccxt
 except ImportError:
     logger.warning("ccxt not installed, 加密数据不可用")
@@ -27,10 +18,11 @@ except ImportError:
 
 
 class DataFetcher:
-    """统一数据获取接口 - 屏蔽不同市场 API 差异。
+    """统一数据获取接口 - 仅支持加密市场（BTC/ETH）。
 
     Provider 注册表（KB github-openbq-org-OpenBB.md §5 "Plugin discovery from metadata"）：
     新增市场/数据源只需在 _PROVIDERS 注册，无需改 get_kline。
+    当前仅含 crypto 一个 provider（SPEC v2 §1 砍 cn/us）。
     """
 
     # ──────────────── Provider 注册表 ────────────────
@@ -42,12 +34,13 @@ class DataFetcher:
         period: Literal['1m', '5m', '15m', '30m', '60m', '1d', '1w', '1M'] = '1d',
         start: Optional[str] = None,
         end: Optional[str] = None,
-        market: Literal['cn', 'us', 'crypto'] = 'cn',
+        market: Literal['crypto'] = 'crypto',
         adjust: Literal['qfq', 'hfq', 'none'] = 'qfq',
     ) -> pd.DataFrame:
         """实例方法：与类方法等价，供单例 data_fetcher 调用。
 
         所有路由都走 Provider 注册表，避免重复 if/elif。
+        SPEC v2：market 仅允许 'crypto'。
         """
         return DataFetcher.get_kline_route(
             symbol, period, start, end, market, adjust
@@ -60,15 +53,14 @@ class DataFetcher:
         period: Literal['1m', '5m', '15m', '30m', '60m', '1d', '1w', '1M'] = '1d',
         start: Optional[str] = None,
         end: Optional[str] = None,
-        market: Literal['cn', 'us', 'crypto'] = 'cn',
+        market: Literal['crypto'] = 'crypto',
         adjust: Literal['qfq', 'hfq', 'none'] = 'qfq',
     ) -> pd.DataFrame:
         """类方法版本（Provider 路由核心实现）。
 
         通过 _PROVIDERS 注册表路由到对应市场的 fetch 方法。
-
         出口统一调用 normalize_kline_df（KB github-openbq-org-OpenBB.md §2
-        "Output normalization adapters"），保证 cn/us/crypto 返回字段名一致。
+        "Output normalization adapters"），保证字段名一致。
         """
         from app.data.normalize import normalize_kline_df
 
@@ -83,150 +75,7 @@ class DataFetcher:
         raw_df = provider(instance, symbol, period, start, end, adjust)
         return normalize_kline_df(raw_df, market)
 
-    # ──────────────── A 股 ────────────────
-
-    def _get_cn_kline(self, symbol, period, start, end, adjust):
-        """A 股数据 - akshare"""
-        if ak is None:
-            raise ImportError("akshare is required for CN market data")
-
-        if not start:
-            start = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
-        if not end:
-            end = datetime.now().strftime('%Y%m%d')
-
-        logger.info(f"Fetching CN kline: {symbol} {period} {start} - {end} {adjust}")
-
-        try:
-            if period in ['1m', '5m', '15m', '30m', '60m']:
-                df = ak.stock_zh_a_hist_min_em(
-                    symbol=symbol,
-                    period=period,
-                    start_date=start,
-                    end_date=end,
-                    adjust=adjust
-                )
-            else:  # 日/周/月
-                period_map = {'1d': 'daily', '1w': 'weekly', '1M': 'monthly'}
-                df = ak.stock_zh_a_hist(
-                    symbol=symbol,
-                    period=period_map.get(period, 'daily'),
-                    start_date=start,
-                    end_date=end,
-                    adjust=adjust
-                )
-            return self._clean_cn_data(df)
-        except Exception as e:
-            logger.error(f"akshare error: {e}")
-            raise
-
-    def _clean_cn_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """A 股数据清洗"""
-        if df.empty:
-            return df
-
-        # 列名标准化
-        column_map = {
-            '日期': 'datetime', '时间': 'datetime',
-            '开盘': 'open', '最高': 'high', '最低': 'low', '收盘': 'close',
-            '成交量': 'volume', '成交额': 'amount',
-            '涨跌幅': 'pct_change',
-        }
-        df = df.rename(columns=column_map)
-
-        # 必填列检查
-        required = ['datetime', 'open', 'high', 'low', 'close', 'volume']
-        missing = [c for c in required if c not in df.columns]
-        if missing:
-            raise ValueError(f"Missing required columns: {missing}")
-
-        # 数据类型转换
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        # 缺失值处理
-        df = df.sort_values('datetime').reset_index(drop=True)
-        df = df.ffill().fillna(0)
-
-        # A 股特殊标记
-        if 'pct_change' in df.columns:
-            df['is_limit_up'] = df['pct_change'] >= 9.5
-            df['is_limit_down'] = df['pct_change'] <= -9.5
-        else:
-            df['is_limit_up'] = False
-            df['is_limit_down'] = False
-        df['is_suspended'] = df['volume'] == 0
-
-        return df
-
-    # ──────────────── 美股 ────────────────
-
-    def _get_us_kline(self, symbol, period, start, end, adjust="qfq"):
-        """美股数据 - yfinance（adjust 参数对美股无效，yfinance 自动处理 split）"""
-        if yf is None:
-            raise ImportError("yfinance is required for US market data")
-        _ = adjust  # 美股仅签名无效
-
-        if not start:
-            start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-        if not end:
-            end = datetime.now().strftime('%Y-%m-%d')
-
-        # yfinance 周期映射
-        period_map = {
-            '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '60m': '60m',
-            '1d': '1d', '1w': '1wk', '1M': '1mo'
-        }
-
-        logger.info(f"Fetching US kline: {symbol} {period} {start} - {end}")
-
-        try:
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(
-                start=start,
-                end=end,
-                interval=period_map.get(period, '1d')
-            )
-            return self._clean_us_data(df)
-        except Exception as e:
-            logger.error(f"yfinance error: {e}")
-            raise
-
-    def _clean_us_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """美股数据清洗"""
-        if df.empty:
-            return df
-
-        # yfinance 返回 MultiIndex 列名，扁平化
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        df = df.reset_index()
-        df = df.rename(columns={
-            'Date': 'datetime', 'Datetime': 'datetime',
-            'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close',
-            'Volume': 'volume'
-        })
-
-        # 处理时区
-        if 'datetime' in df.columns:
-            df['datetime'] = pd.to_datetime(df['datetime'])
-            if df['datetime'].dt.tz is not None:
-                df['datetime'] = df['datetime'].dt.tz_localize(None)
-
-        # 数据类型
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        # 缺失值
-        df = df.ffill().fillna(0)
-        df['is_suspended'] = df['volume'] == 0
-
-        return df
-
-    # ──────────────── 加密货币 ────────────────
+    # ──────────────── 加密货币（仅保留）────────────
 
     def _get_crypto_kline(self, symbol, period, start, end, adjust="qfq"):
         """加密货币数据 - ccxt（adjust 参数对加密无效，无复权概念）"""
@@ -302,10 +151,8 @@ class DataFetcher:
 
 
 # ──────────────── Provider 注册（KB github-openbq-org-OpenBB.md §5）──
-# 每个 (market → method) 一行，新加数据源只改这里
+# SPEC v2 §1：只做 BTC/ETH（crypto）。cn/us 已删除，不再注册。
 DataFetcher._PROVIDERS = {
-    "cn": DataFetcher._get_cn_kline,
-    "us": DataFetcher._get_us_kline,
     "crypto": DataFetcher._get_crypto_kline,
 }
 
