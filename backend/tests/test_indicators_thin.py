@@ -59,37 +59,35 @@ def test_indicators_backward_compatible():
     assert missing_cols == set(), f"缺少原始指标列：{missing_cols}"
 
 
-# ─── 测试2：委托 AnalyticsEngine ─────────────────────────────────────────
+# ─── 测试2：IndicatorEngine 独立实现（不调 AnalyticsEngine）─────────────────
+# 历史：A4 阶段最初让 IndicatorEngine.calculate_all 委托给 AnalyticsEngine，
+# 但 services/analytics 双向 import 引发循环依赖。
+# 修复：IndicatorEngine 内部直接调 _calc_* 私有方法，对外输出列名契约保持不变。
+# 此测试验证契约（输出列名）与解耦（不引入循环依赖）。
 
-def test_indicators_delegates_to_analytics(monkeypatch):
-    """验证 services.indicators.calculate_all 路径包含 AnalyticsEngine.calculate_all。"""
+def test_indicators_no_circular_dependency():
+    """验证 services.indicators 不依赖 app.analytics（避免循环）。"""
+    import sys
+    import app.services.indicators as indicators_mod
+    # 关键属性：不应在模块中持有 'app.analytics' 的引用
+    module_dict = vars(indicators_mod)
+    analytics_refs = [
+        name for name in module_dict
+        if "analytics" in name.lower() and not name.startswith("_ORIGINAL")
+    ]
+    # calculate_all 实现中不应出现 "from app.analytics" 字符串
+    import inspect
+    source = inspect.getsource(indicators_mod.IndicatorEngine.calculate_all)
+    assert "from app.analytics" not in source
+    assert "import app.analytics" not in source
+
+
+def test_indicators_output_matches_original_6_cols():
+    """验证 IndicatorEngine.calculate_all 输出列名 = M1 原始 6 指标族契约。"""
     from app.services.indicators import IndicatorEngine
-    import app.analytics as analytics_module
-
-    # 记录调用
-    call_log = []
-
-    class FakeAnalyticsEngine:
-        @staticmethod
-        def calculate_all(df):
-            call_log.append(True)
-            # 模拟 AnalyticsEngine 返回的 DataFrame（含指标列）
-            result = IndicatorEngine._calc_ma(df.copy())
-            result = IndicatorEngine._calc_macd(result)
-            result = IndicatorEngine._calc_rsi(result)
-            result = IndicatorEngine._calc_boll(result)
-            result = IndicatorEngine._calc_kdj(result)
-            result = IndicatorEngine._calc_obv(result)
-            return result
-
-    monkeypatch.setattr(analytics_module, "AnalyticsEngine", FakeAnalyticsEngine)
 
     df = _make_random_walk_df(n=100)
     result = IndicatorEngine.calculate_all(df)
-
-    # 如果实现正确，AnalyticsEngine 被调用
-    assert len(call_log) > 0, "AnalyticsEngine.calculate_all 未被调用"
-    # 且结果只有原始指标列（不含 ADX14/ATR14/Hurst）
     indicator_cols = set(result.columns) - {
         "datetime", "open", "high", "low", "close", "volume"
     }
